@@ -1,17 +1,17 @@
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::common;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ListenerOptions {
     pub tag: String,
     #[serde(flatten)]
     pub inner: ListenerInnerOptions,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum ListenerInnerOptions {
     #[serde(alias = "tcp")]
@@ -28,7 +28,7 @@ pub enum ListenerInnerOptions {
     QUICListener(QUICListenerOptions),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct UDPListenerOptions {
     pub listen: String,
     #[serde(flatten)]
@@ -36,7 +36,7 @@ pub struct UDPListenerOptions {
     pub generic: GenericListenerOptions,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TCPListenerOptions {
     pub listen: String,
     #[serde(flatten)]
@@ -44,7 +44,7 @@ pub struct TCPListenerOptions {
     pub generic: GenericListenerOptions,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct BaseListenerOptions {
     #[serde(rename = "listen-port")]
     pub listen_port: u16,
@@ -56,7 +56,7 @@ pub struct BaseListenerOptions {
     pub generic: GenericListenerOptions,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TLSListenerOptions {
     pub listen: String,
     #[serde(flatten)]
@@ -67,7 +67,7 @@ pub struct TLSListenerOptions {
     pub generic: GenericListenerOptions,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct HTTPListenerOptions {
     pub listen: String,
     #[serde(default)]
@@ -83,7 +83,7 @@ pub struct HTTPListenerOptions {
     pub generic: GenericListenerOptions,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct QUICListenerOptions {
     pub listen: String,
     #[serde(flatten)]
@@ -96,10 +96,11 @@ pub struct QUICListenerOptions {
 
 // TLS
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ListenerTLSOptions {
     #[serde(rename = "client-ca-file")]
-    pub client_ca_file: Option<common::Listable<String>>,
+    #[serde(default)]
+    pub client_ca_file: common::SingleOrList<String>,
     #[serde(rename = "server-cert-file")]
     pub server_cert_file: String,
     #[serde(rename = "server-key-file")]
@@ -108,7 +109,7 @@ pub struct ListenerTLSOptions {
 
 // Generic
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct GenericListenerOptions {
     #[serde(rename = "query-timeout")]
     #[serde(default)]

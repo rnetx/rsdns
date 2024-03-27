@@ -1,11 +1,14 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+use crate::{common, log};
+
+#[derive(Default, Debug, Clone, Deserialize)]
 pub struct LogOptions {
     #[serde(default)]
     pub disabled: bool,
     #[serde(default)]
-    pub level: String,
+    #[serde(deserialize_with = "common::deserialize_with_from_str")]
+    pub level: log::Level,
     #[serde(default)]
     #[serde(rename = "disable-timestamp")]
     pub disable_timestamp: bool,

@@ -1,12 +1,18 @@
 use std::{error::Error, fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum Level {
+pub enum Level {
     Debug,
     Info,
     Warn,
     Error,
     Fatal,
+}
+
+impl Default for Level {
+    fn default() -> Self {
+        Self::Info
+    }
 }
 
 impl fmt::Debug for Level {

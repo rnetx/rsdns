@@ -1,6 +1,6 @@
 use std::{collections::HashMap, error::Error, str::FromStr, sync::Arc};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt},
@@ -11,12 +11,12 @@ use crate::{adapter, common, debug, log};
 
 pub(crate) const TYPE: &str = "domain";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct Options {
     #[serde(default)]
-    rule: Option<common::Listable<common::Domain>>,
+    rule: common::SingleOrList<common::Domain>,
     #[serde(default)]
-    file: Option<common::Listable<String>>,
+    file: common::SingleOrList<String>,
 }
 
 pub(crate) struct Domain {
@@ -39,18 +39,26 @@ impl Domain {
                 format!("failed to deserialize options: {}", err).into()
             })?;
         let logger = Arc::new(logger);
-        if options.rule.is_none() && options.file.is_none() {
+        if options.rule.len() > 0 && options.file.len() > 0 {
             return Err("missing rule or file".into());
         }
-        let inner_domain_matcher = options
-            .rule
-            .map(|domain| common::DomainMatcher::new(domain.into_list()));
+        let inner_domain_matcher = if options.rule.len() > 0 {
+            Some(common::DomainMatcher::new(options.rule.into_list()))
+        } else {
+            None
+        };
 
         let s = Self {
             tag,
             logger,
             inner_domain_matcher,
-            files: Arc::new(options.file.map(|v| v.into_list())),
+            files: Arc::new({
+                if options.file.len() > 0 {
+                    Some(options.file.into_list())
+                } else {
+                    None
+                }
+            }),
             file_domain_matcher: Arc::new(RwLock::new(None)),
         };
 
@@ -169,7 +177,8 @@ impl adapter::MatcherPlugin for Domain {
         debug!(
             self.logger,
             { tracker = ctx.log_tracker() },
-            "no domain matched",
+            "no domain matched: {}",
+            domain,
         );
         Ok(false)
     }

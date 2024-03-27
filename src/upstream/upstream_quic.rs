@@ -1,7 +1,6 @@
 use std::{
     error::Error,
-    io::{self, IoSlice},
-    net::SocketAddr,
+    io::IoSlice,
     ops::{Deref, DerefMut},
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering},
@@ -30,10 +29,11 @@ pub(crate) struct QUICUpstream {
     tag: String,
     address: network::SocksAddr,
     idle_timeout: Duration,
+    disable_add_prefix: bool,
     quic_client_config: quinn::ClientConfig,
     server_name: rustls::ServerName,
     bootstrap: Option<super::Bootstrap>,
-    dialer: network::Dialer,
+    dialer: Arc<network::Dialer>,
     //
     last_use: Arc<AtomicI64>,
     connection: Arc<RwLock<Option<QUICConnection>>>,
@@ -48,7 +48,10 @@ impl QUICUpstream {
         options: option::QUICUpstreamOptions,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let address = network::SocksAddr::parse_with_default_port(&options.address, 853)?;
-        let dialer = network::Dialer::new(manager.clone(), options.dialer.unwrap_or_default())?;
+        let dialer = Arc::new(network::Dialer::new(
+            manager.clone(),
+            options.dialer.unwrap_or_default(),
+        )?);
         let (mut tls_client_config, server_name) = super::new_tls_config(options.tls)?;
         let server_name = match server_name {
             Some(s) => s,
@@ -73,7 +76,7 @@ impl QUICUpstream {
         if address.is_domain_addr() && bootstrap.is_none() && !dialer.domain_support() {
             return Err("domain address not supported, because dialer is unsupported, and bootstrap is not set".into());
         }
-        tls_client_config.alpn_protocols = vec![b"doq".to_vec()];
+        tls_client_config.alpn_protocols = vec![b"doq".to_vec(), b"doq-i11".to_vec()];
         let quic_client_config = quinn::ClientConfig::new(Arc::new(tls_client_config));
         Ok(Self {
             manager,
@@ -82,6 +85,7 @@ impl QUICUpstream {
             idle_timeout: options
                 .idle_timeout
                 .unwrap_or_else(|| super::DEFAULT_IDLE_TIMEOUT),
+            disable_add_prefix: options.disable_add_prefix,
             address,
             quic_client_config,
             server_name,
@@ -139,36 +143,27 @@ impl QUICUpstream {
                 return Ok(connection);
             }
         }
-        let address = self.address.clone();
-        let (quic_endpoint, quic_connection) =
-            if address.is_domain_addr() && self.bootstrap.is_some() {
-                let (domain, port) = address.must_domain_addr();
-                let bootstrap = self.bootstrap.as_ref().unwrap();
-                debug!(self.logger, "lookup {}", domain);
-                let ips = bootstrap.lookup(domain).await.map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("lookup domain {} failed: {}", domain, err),
-                    )
-                })?;
-                // TODO: Use First
-                let addr = network::SocksAddr::from(SocketAddr::new(ips[0], port));
-                self.dialer
-                    .new_quic_connection(
-                        addr,
-                        self.quic_client_config.clone(),
-                        &self.get_server_name_str(),
-                    )
-                    .await?
-            } else {
-                self.dialer
-                    .new_quic_connection(
-                        address,
-                        self.quic_client_config.clone(),
-                        &self.get_server_name_str(),
-                    )
-                    .await?
-            };
+        let (quic_endpoint, quic_connection) = super::Bootstrap::dial_with_bootstrap(
+            &self.logger,
+            self.address.clone(),
+            &self.bootstrap,
+            (
+                self.dialer.clone(),
+                self.quic_client_config.clone(),
+                self.get_server_name_str(),
+            ),
+            |address, (dialer, quic_client_config, server_name)| async move {
+                dialer
+                    .new_quic_connection(address, quic_client_config, &server_name)
+                    .await
+            },
+            |ips, port, (dialer, quic_client_config, server_name)| async move {
+                dialer
+                    .parallel_new_quic_connection(ips, port, quic_client_config, &server_name)
+                    .await
+            },
+        )
+        .await?;
         debug!(self.logger, "new quic connection");
         let quic_connection =
             QUICConnection::new(self.logger.clone(), quic_endpoint, quic_connection);
@@ -194,33 +189,46 @@ impl QUICUpstream {
             quic_connection.set_close_tag();
             e
         })?;
-        sender
-            .write_vectored(&[
-                IoSlice::new(&(request_bytes.len() as u16).to_be_bytes()),
-                IoSlice::new(&request_bytes),
-            ])
-            .await
-            .map_err(|e| {
-                quic_connection.set_close_tag();
-                e
-            })?;
+        if !self.disable_add_prefix {
+            sender
+                .write_vectored(&[
+                    IoSlice::new(&(request_bytes.len() as u16).to_be_bytes()),
+                    IoSlice::new(&request_bytes),
+                ])
+                .await
+        } else {
+            sender.write_vectored(&[IoSlice::new(&request_bytes)]).await
+        }
+        .map_err(|e| {
+            quic_connection.set_close_tag();
+            e
+        })?;
         sender.finish().await.map_err(|e| {
             quic_connection.set_close_tag();
             e
         })?;
-        let length = receiver.read_u16().await.map_err(|e| {
-            quic_connection.set_close_tag();
-            e
-        })?;
-        let mut buf = vec![0u8; length as usize];
-        receiver.read_exact(&mut buf).await.map_err(|e| {
-            quic_connection.set_close_tag();
-            e
-        })?;
-        let result = Message::from_vec(&buf).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
+        if !self.disable_add_prefix {
+            let length = receiver.read_u16().await.map_err(|e| {
+                quic_connection.set_close_tag();
+                e
+            })?;
+            let mut buf = vec![0u8; length as usize];
+            receiver.read_exact(&mut buf).await.map_err(|e| {
+                quic_connection.set_close_tag();
+                e
+            })?;
+            Message::from_vec(&buf)
+        } else {
+            let mut buf = Vec::with_capacity(65535);
+            let length = receiver.read_buf(&mut buf).await.map_err(|e| {
+                quic_connection.set_close_tag();
+                e
+            })?;
+            Message::from_vec(&buf[..length])
+        }
+        .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
             format!("deserialize response failed: {}", err).into()
-        });
-        result
+        })
     }
 }
 

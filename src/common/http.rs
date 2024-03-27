@@ -45,11 +45,11 @@ impl<T> GenericResponse<T> {
     }
 }
 
-impl GenericResponse<serde_yaml::Value> {
+impl GenericResponse<serde_json::Value> {
     pub(crate) fn new_empty(status: http::StatusCode) -> Self {
         Self {
             status,
-            data: serde_yaml::Value::Null,
+            data: serde_json::Value::Null,
         }
     }
 }

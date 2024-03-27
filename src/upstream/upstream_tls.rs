@@ -96,21 +96,15 @@ impl TLSUpstream {
     }
 
     async fn new_tcp_stream(&self) -> io::Result<network::GenericTcpStream> {
-        let address = self.address.clone();
-        if address.is_domain_addr() && self.bootstrap.is_some() {
-            let (domain, port) = address.must_domain_addr();
-            let bootstrap = self.bootstrap.as_ref().unwrap();
-            debug!(self.logger, "lookup {}", domain);
-            let ips = bootstrap.lookup(domain).await.map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("lookup domain {} failed: {}", domain, err),
-                )
-            })?;
-            self.dialer.parallel_new_tcp_stream(ips, port).await
-        } else {
-            self.dialer.new_tcp_stream(address).await
-        }
+        super::Bootstrap::dial_with_bootstrap(
+            &self.logger,
+            self.address.clone(),
+            &self.bootstrap,
+            self.dialer.clone(),
+            |address, dialer| async move { dialer.new_tcp_stream(address).await },
+            |ips, port, dialer| async move { dialer.parallel_new_tcp_stream(ips, port).await },
+        )
+        .await
     }
 
     async fn new_tls_stream(

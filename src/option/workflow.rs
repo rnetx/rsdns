@@ -1,119 +1,220 @@
-use std::net::IpAddr;
+use std::{collections::HashMap, net::IpAddr};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::common;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct WorkflowOptions {
     pub tag: String,
-    pub rules: common::Listable<WorkflowRuleOptions>,
+    pub rules: common::SingleOrList<WorkflowRuleOptions>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum WorkflowRuleOptions {
     MatchAnd(MatchAndRuleOptions),
     MatchOr(MatchOrRuleOptions),
     Exec(ExecRuleOptions),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl<'de> serde::Deserialize<'de> for WorkflowRuleOptions {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = WorkflowRuleOptions;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("WorkflowRuleOptions")
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let map: serde_yaml::Mapping = serde::de::Deserialize::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(map),
+                )?;
+
+                let contain_match_and = map.contains_key("match-and");
+                let contain_match_or = map.contains_key("match-or");
+                let contain_exec = map.contains_key("exec");
+                let contain_else_exec = map.contains_key("else-exec");
+
+                match (
+                    contain_match_and,
+                    contain_match_or,
+                    contain_exec,
+                    contain_else_exec,
+                ) {
+                    (true, false, true, false) | (true, false, _, true) => {
+                        // match-and
+                        MatchAndRuleOptions::deserialize(serde_yaml::Value::Mapping(map))
+                            .map(|m| WorkflowRuleOptions::MatchAnd(m))
+                            .map_err(|e| serde::de::Error::custom(format!("{}", e)))
+                    }
+                    (false, true, true, false) | (false, true, _, true) => {
+                        // match-or
+                        MatchOrRuleOptions::deserialize(serde_yaml::Value::Mapping(map))
+                            .map(|m| WorkflowRuleOptions::MatchOr(m))
+                            .map_err(|e| serde::de::Error::custom(format!("{}", e)))
+                    }
+                    (false, false, true, false) => {
+                        // exec
+                        ExecRuleOptions::deserialize(serde_yaml::Value::Mapping(map))
+                            .map(|m| WorkflowRuleOptions::Exec(m))
+                            .map_err(|e| serde::de::Error::custom(format!("{}", e)))
+                    }
+                    _ => Err(serde::de::Error::custom("invalid WorkflowRuleOptions")),
+                }
+            }
+        }
+
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct MatchAndRuleOptions {
     #[serde(rename = "match-and")]
-    pub match_and: common::Listable<super::MatchItemRuleOptions>,
+    pub match_and: common::SingleOrList<MatchItemRuleOptions>,
     #[serde(default)]
-    pub exec: Option<common::Listable<super::ExecItemRuleOptions>>,
+    pub exec: common::SingleOrList<ExecItemRuleOptions>,
     #[serde(default)]
     #[serde(rename = "else-exec")]
-    pub else_exec: Option<common::Listable<super::ExecItemRuleOptions>>,
+    pub else_exec: common::SingleOrList<ExecItemRuleOptions>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MatchOrRuleOptions {
     #[serde(rename = "match-or")]
-    pub match_or: common::Listable<super::MatchItemRuleOptions>,
+    pub match_or: common::SingleOrList<MatchItemRuleOptions>,
     #[serde(default)]
-    pub exec: Option<common::Listable<super::ExecItemRuleOptions>>,
+    pub exec: common::SingleOrList<ExecItemRuleOptions>,
     #[serde(default)]
     #[serde(rename = "else-exec")]
-    pub else_exec: Option<common::Listable<super::ExecItemRuleOptions>>,
+    pub else_exec: common::SingleOrList<ExecItemRuleOptions>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ExecRuleOptions {
-    pub exec: common::Listable<super::ExecItemRuleOptions>,
+    pub exec: common::SingleOrList<ExecItemRuleOptions>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum MatchItemRuleOptions {
-    #[serde(rename = "listener")]
-    Listener(common::Listable<String>),
-    #[serde(rename = "!listener")]
-    InvertListener(common::Listable<String>),
+#[derive(Debug, Clone)]
+pub struct MatchItemRuleOptions {
+    pub invert: bool,
+    pub options: MatchItemWrapperRuleOptions,
+}
 
-    #[serde(rename = "client-ip")]
-    ClientIP(common::Listable<String>),
-    #[serde(rename = "!client-ip")]
-    InvertClientIP(common::Listable<String>),
+impl<'de> serde::Deserialize<'de> for MatchItemRuleOptions {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
 
-    #[serde(rename = "qtype")]
-    QType(common::Listable<serde_yaml::Value>),
-    #[serde(rename = "!qtype")]
-    InvertQType(common::Listable<serde_yaml::Value>),
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = MatchItemRuleOptions;
 
-    #[serde(rename = "qname")]
-    QName(common::Listable<String>),
-    #[serde(rename = "!qname")]
-    InvertQName(common::Listable<String>),
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("MatchItemRuleOptions")
+            }
 
-    #[serde(rename = "has-resp-msg")]
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut key = match map.next_key::<String>()? {
+                    Some(key) => key,
+                    None => {
+                        return Err(serde::de::Error::custom("invalid MatchItemRuleOptions"));
+                    }
+                };
+                let invert = if key.starts_with('~') {
+                    key = key[1..].to_string();
+                    true
+                } else {
+                    false
+                };
+                let v =
+                    match key.as_str() {
+                        "listener" => MatchItemWrapperRuleOptions::Listener(
+                            map.next_value::<common::SingleOrList<String>>()?.into(),
+                        ),
+                        "client-ip" => MatchItemWrapperRuleOptions::ClientIP(
+                            map.next_value::<common::SingleOrList<String>>()?.into(),
+                        ),
+                        "qtype" => MatchItemWrapperRuleOptions::QType(
+                            map.next_value::<common::SingleOrList<serde_yaml::Value>>()?
+                                .into(),
+                        ),
+                        "qname" => MatchItemWrapperRuleOptions::QName(
+                            map.next_value::<common::SingleOrList<String>>()?.into(),
+                        ),
+                        "has-resp-msg" => {
+                            MatchItemWrapperRuleOptions::HasRespMsg(map.next_value::<bool>()?)
+                        }
+                        "resp-ip" => MatchItemWrapperRuleOptions::RespIP(
+                            map.next_value::<common::SingleOrList<String>>()?.into(),
+                        ),
+                        "mark" => MatchItemWrapperRuleOptions::Mark(
+                            map.next_value::<common::SingleOrList<i16>>()?.into(),
+                        ),
+                        "metadata" => MatchItemWrapperRuleOptions::Metadata(
+                            map.next_value::<HashMap<String, String>>()?,
+                        ),
+                        "env" => MatchItemWrapperRuleOptions::Env(
+                            map.next_value::<HashMap<String, String>>()?,
+                        ),
+                        "plugin" => MatchItemWrapperRuleOptions::Plugin(
+                            map.next_value::<WorkflowPluginOptions>()?,
+                        ),
+                        _ => {
+                            return Err(serde::de::Error::custom("invalid MatchItemRuleOptions"));
+                        }
+                    };
+                Ok(MatchItemRuleOptions { invert, options: v })
+            }
+        }
+
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum MatchItemWrapperRuleOptions {
+    Listener(common::SingleOrList<String>),
+    ClientIP(common::SingleOrList<String>),
+    QType(common::SingleOrList<serde_yaml::Value>),
+    QName(common::SingleOrList<String>),
     HasRespMsg(bool),
-    #[serde(rename = "!has-resp-msg")]
-    InvertHasRespMsg(bool),
-
-    #[serde(rename = "resp-ip")]
-    RespIP(common::Listable<String>),
-    #[serde(rename = "!resp-ip")]
-    InvertRespIP(common::Listable<String>),
-
-    #[serde(rename = "mark")]
-    Mark(common::Listable<i16>),
-    #[serde(rename = "!mark")]
-    InvertMark(common::Listable<i16>),
-
-    #[serde(rename = "metadata")]
-    Metadata(serde_yaml::Mapping), // Must Match All
-    #[serde(rename = "!metadata")]
-    InvertMetadata(serde_yaml::Mapping),
-
-    #[serde(rename = "env")]
-    Env(serde_yaml::Mapping), // Must Match Any
-    #[serde(rename = "!env")]
-    InvertEnv(serde_yaml::Mapping),
-
-    #[serde(rename = "plugin")]
+    RespIP(common::SingleOrList<String>),
+    Mark(common::SingleOrList<i16>),
+    Metadata(HashMap<String, String>), // Must Match All
+    Env(HashMap<String, String>),      // Must Match Any
     Plugin(WorkflowPluginOptions),
-    #[serde(rename = "!plugin")]
-    InvertPlugin(WorkflowPluginOptions),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum ExecItemRuleOptions {
     #[serde(rename = "mark")]
     Mark(i16),
     #[serde(rename = "metadata")]
-    Metadata(serde_yaml::Mapping),
+    Metadata(HashMap<String, String>),
     #[serde(rename = "set-ttl")]
     SetTTL(u32),
     #[serde(rename = "set-resp-ip")]
-    SetRespIP(common::Listable<IpAddr>),
+    SetRespIP(common::SingleOrList<IpAddr>),
     #[serde(rename = "plugin")]
     Plugin(WorkflowPluginOptions),
     #[serde(rename = "upstream")]
     Upstream(String),
     #[serde(rename = "jump-to")]
-    JumpTo(common::Listable<String>),
+    JumpTo(common::SingleOrList<String>),
     #[serde(rename = "go-to")]
     GoTo(String),
     #[serde(rename = "clean-resp")]
@@ -124,7 +225,7 @@ pub enum ExecItemRuleOptions {
 
 // Plugin
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct WorkflowPluginOptions {
     pub tag: String,
     #[serde(default)]

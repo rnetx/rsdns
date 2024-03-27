@@ -16,12 +16,11 @@ impl Workflow {
         tag: String,
         options: option::WorkflowOptions,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let rules = options.rules.into_list();
-        if rules.len() == 0 {
+        if options.rules.is_empty() {
             return Err("missing rule".into());
         }
-        let mut l = Vec::with_capacity(rules.len());
-        for (i, rule) in rules.into_iter().enumerate() {
+        let mut l = Vec::with_capacity(options.rules.len());
+        for (i, rule) in options.rules.into_list().into_iter().enumerate() {
             let r = super::WorkflowRule::new(rule).map_err::<Box<dyn Error + Send + Sync>, _>(
                 |err| format!("create rule[{}] failed: {}", i, err).into(),
             )?;

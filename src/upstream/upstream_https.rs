@@ -21,6 +21,8 @@ use super::network;
 
 const HTTPS_UPSTREAM_TYPE: &str = "https";
 
+const DEFAULT_PATH: &str = "/dns-query";
+
 pub(crate) struct HTTPSUpstream {
     manager: Arc<Box<dyn adapter::Manager>>,
     logger: Arc<Box<dyn log::Logger>>,
@@ -66,7 +68,7 @@ impl HTTPSUpstream {
         if address.is_domain_addr() && bootstrap.is_none() && !dialer.domain_support() {
             return Err("domain address not supported, because dialer is unsupported, and bootstrap is not set".into());
         }
-        let path = options.path.unwrap_or("/dns-query".to_owned());
+        let path = options.path.unwrap_or(DEFAULT_PATH.to_owned());
         let host = {
             let port = address.port();
             if port == 443 {
@@ -496,24 +498,15 @@ impl HTTPSConnector {
     }
 
     async fn new_tcp_stream(&self) -> io::Result<network::GenericTcpStream> {
-        let address = self.address.clone();
-        if address.is_domain_addr() && self.bootstrap.is_some() {
-            let (domain, port) = address.must_domain_addr();
-            let bootstrap = match self.bootstrap.as_ref() {
-                Some(bootstrap) => bootstrap,
-                None => unreachable!(),
-            };
-            debug!(self.logger, "lookup {}", domain);
-            let ips = bootstrap.lookup(domain).await.map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("lookup domain {} failed: {}", domain, err),
-                )
-            })?;
-            self.dialer.parallel_new_tcp_stream(ips, port).await
-        } else {
-            self.dialer.new_tcp_stream(address).await
-        }
+        super::Bootstrap::dial_with_bootstrap(
+            &self.logger,
+            self.address.clone(),
+            &self.bootstrap,
+            self.dialer.clone(),
+            |address, dialer| async move { dialer.new_tcp_stream(address).await },
+            |ips, port, dialer| async move { dialer.parallel_new_tcp_stream(ips, port).await },
+        )
+        .await
     }
 
     async fn new_tls_stream(
@@ -751,7 +744,7 @@ mod http3 {
         server_name: rustls::ServerName,
         idle_timeout: Duration,
         bootstrap: Option<super::super::Bootstrap>,
-        dialer: super::network::Dialer,
+        dialer: Arc<super::network::Dialer>,
         //
         last_use: Arc<AtomicI64>,
         connection: Arc<RwLock<Option<HTTP3Connection>>>,
@@ -777,7 +770,7 @@ mod http3 {
                 server_name,
                 idle_timeout,
                 bootstrap,
-                dialer,
+                dialer: Arc::new(dialer),
                 last_use: Arc::new(AtomicI64::new(0)),
                 connection: Arc::new(RwLock::new(None)),
                 handler: Mutex::new(None),
@@ -864,14 +857,27 @@ mod http3 {
                     return Ok(connection);
                 }
             }
-            let (quic_endpoint, quic_connection) = self
-                .dialer
-                .new_quic_connection(
-                    self.address.clone(),
+            let (quic_endpoint, quic_connection) = super::super::Bootstrap::dial_with_bootstrap(
+                &self.logger,
+                self.address.clone(),
+                &self.bootstrap,
+                (
+                    self.dialer.clone(),
                     self.quic_client_config.clone(),
-                    &self.get_server_name_str(),
-                )
-                .await?;
+                    self.get_server_name_str(),
+                ),
+                |address, (dialer, quic_client_config, server_name)| async move {
+                    dialer
+                        .new_quic_connection(address, quic_client_config, &server_name)
+                        .await
+                },
+                |ips, port, (dialer, quic_client_config, server_name)| async move {
+                    dialer
+                        .parallel_new_quic_connection(ips, port, quic_client_config, &server_name)
+                        .await
+                },
+            )
+            .await?;
             super::debug!(self.logger, "new http3 connection");
             let http3_connection = HTTP3Connection::connect(
                 self.logger.clone(),

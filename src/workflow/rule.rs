@@ -68,19 +68,17 @@ impl MatchRule {
     pub(super) fn new_and(
         options: option::MatchAndRuleOptions,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let match_and = options.match_and.into_list();
-        let mut matchers = Vec::with_capacity(match_and.len());
-        for (i, options) in match_and.into_iter().enumerate() {
+        let mut matchers = Vec::with_capacity(options.match_and.len());
+        for (i, options) in options.match_and.into_list().into_iter().enumerate() {
             let rule = super::MatchItemRule::new(options)
                 .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                     format!("create match-and-rule: match-and[{}] failed: {}", i, err).into()
                 })?;
             matchers.push(rule);
         }
-        let execs = if let Some(exec) = options.exec {
-            let exec = exec.into_list();
-            let mut execs = Vec::with_capacity(exec.len());
-            for (i, options) in exec.into_iter().enumerate() {
+        let execs = if options.exec.len() > 0 {
+            let mut execs = Vec::with_capacity(options.exec.len());
+            for (i, options) in options.exec.into_list().into_iter().enumerate() {
                 let rule = super::ExecItemRule::new(options)
                     .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                         format!("create match-and-rule: exec[{}] failed: {}", i, err).into()
@@ -91,10 +89,9 @@ impl MatchRule {
         } else {
             None
         };
-        let else_exec = if let Some(else_exec) = options.else_exec {
-            let else_exec = else_exec.into_list();
-            let mut else_execs = Vec::with_capacity(else_exec.len());
-            for (i, options) in else_exec.into_iter().enumerate() {
+        let else_exec = if options.else_exec.len() > 0 {
+            let mut else_execs = Vec::with_capacity(options.else_exec.len());
+            for (i, options) in options.else_exec.into_list().into_iter().enumerate() {
                 let rule = super::ExecItemRule::new(options)
                     .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                         format!("create match-and-rule: else-exec[{}] failed: {}", i, err).into()
@@ -116,19 +113,17 @@ impl MatchRule {
     pub(super) fn new_or(
         options: option::MatchOrRuleOptions,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let match_or = options.match_or.into_list();
-        let mut matchers = Vec::with_capacity(match_or.len());
-        for (i, options) in match_or.into_iter().enumerate() {
+        let mut matchers = Vec::with_capacity(options.match_or.len());
+        for (i, options) in options.match_or.into_list().into_iter().enumerate() {
             let rule = super::MatchItemRule::new(options)
                 .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                     format!("create match-or-rule: match-or[{}] failed: {}", i, err).into()
                 })?;
             matchers.push(rule);
         }
-        let execs = if let Some(exec) = options.exec {
-            let exec = exec.into_list();
-            let mut execs = Vec::with_capacity(exec.len());
-            for (i, options) in exec.into_iter().enumerate() {
+        let execs = if options.exec.len() > 0 {
+            let mut execs = Vec::with_capacity(options.exec.len());
+            for (i, options) in options.exec.into_list().into_iter().enumerate() {
                 let rule = super::ExecItemRule::new(options)
                     .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                         format!("create match-or-rule: exec[{}] failed: {}", i, err).into()
@@ -139,10 +134,9 @@ impl MatchRule {
         } else {
             None
         };
-        let else_exec = if let Some(else_exec) = options.else_exec {
-            let else_exec = else_exec.into_list();
-            let mut else_execs = Vec::with_capacity(else_exec.len());
-            for (i, options) in else_exec.into_iter().enumerate() {
+        let else_exec = if options.else_exec.len() > 0 {
+            let mut else_execs = Vec::with_capacity(options.else_exec.len());
+            for (i, options) in options.else_exec.into_list().into_iter().enumerate() {
                 let rule = super::ExecItemRule::new(options)
                     .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                         format!("create match-or-rule: else-exec[{}] failed: {}", i, err).into()
@@ -401,9 +395,8 @@ impl ExecRule {
     pub(super) fn new(
         options: option::ExecRuleOptions,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let exec = options.exec.into_list();
-        let mut execs = Vec::with_capacity(exec.len());
-        for (i, options) in exec.into_iter().enumerate() {
+        let mut execs = Vec::with_capacity(options.exec.len());
+        for (i, options) in options.exec.into_list().into_iter().enumerate() {
             let rule = super::ExecItemRule::new(options)
                 .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                     format!("create exec-rule: exec[{}] failed: {}", i, err).into()

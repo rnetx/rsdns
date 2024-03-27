@@ -1,14 +1,15 @@
-use std::{error::Error, net::IpAddr, sync::Arc, time::Duration};
+use std::{error::Error, io, net::IpAddr, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Local};
+use futures_util::Future;
 use hickory_proto::{
-    op::{Message, Query},
+    op::{Message, MessageType, OpCode, Query},
     rr::{DNSClass, Name, RData, RecordType},
 };
 use rand::Rng;
 use tokio::{sync::RwLock, task::JoinSet};
 
-use crate::{adapter, option};
+use crate::{adapter, debug, log, option};
 
 pub(super) struct Bootstrap {
     manager: Arc<Box<dyn adapter::Manager>>,
@@ -62,6 +63,8 @@ impl Bootstrap {
         let mut message = Message::new();
         message.set_id(rand::thread_rng().gen());
         message.set_recursion_desired(true);
+        message.set_message_type(MessageType::Query);
+        message.set_op_code(OpCode::Query);
         message.add_query(query);
         Ok(message)
     }
@@ -192,5 +195,38 @@ impl Bootstrap {
         let (ips, ttl) = self.lookup_wrapper(domain).await?;
         self.cache.write().await.replace((ips.clone(), now + ttl));
         Ok(ips)
+    }
+}
+
+impl Bootstrap {
+    pub(crate) async fn dial_with_bootstrap<T, P, F1, F2, Fut1, Fut2>(
+        logger: &Box<dyn log::Logger>,
+        address: super::network::SocksAddr,
+        bootstrap: &Option<Self>,
+        call_params: P,
+        no_need_fn: F1,
+        need_fn: F2,
+    ) -> io::Result<T>
+    where
+        F1: Fn(super::network::SocksAddr, P) -> Fut1,
+        F2: Fn(Vec<IpAddr>, u16, P) -> Fut2,
+        Fut1: Future<Output = io::Result<T>>,
+        Fut2: Future<Output = io::Result<T>>,
+    {
+        if address.is_domain_addr() && bootstrap.is_some() {
+            let (domain, port) = address.must_domain_addr();
+            let bootstrap = bootstrap.as_ref().unwrap();
+            debug!(logger, "lookup {}", domain);
+            let ips = bootstrap.lookup(domain).await.map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("lookup domain {} failed: {}", domain, err),
+                )
+            })?;
+            debug!(logger, "lookup {} success: {:?}", domain, ips);
+            need_fn(ips, port, call_params).await
+        } else {
+            no_need_fn(address, call_params).await
+        }
     }
 }

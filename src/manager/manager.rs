@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     error::Error,
     fs, io,
-    str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -56,16 +55,10 @@ pub struct Manager {
 }
 
 impl Manager {
-    pub async fn prepare(
-        mut options: option::Options,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub async fn prepare(options: option::Options) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let root_logger = Arc::new(if options.log.disabled {
             log::NopLogger.into_box()
         } else {
-            if options.log.level.is_empty() {
-                options.log.level = log::Level::Info.to_string().to_ascii_lowercase();
-            }
-            let level = log::Level::from_str(&options.log.level)?;
             let output = match options.log.output.as_str() {
                 "" | "stdout" => Box::new(io::stdout()) as Box<dyn io::Write>,
                 "stderr" => Box::new(io::stderr()) as Box<dyn io::Write>,
@@ -78,7 +71,8 @@ impl Manager {
                     Box::new(f) as Box<dyn io::Write>
                 }
             };
-            log::BasicLogger::new(options.log.disable_timestamp, level, output).into_box()
+            log::BasicLogger::new(options.log.disable_timestamp, options.log.level, output)
+                .into_box()
         });
         let manager = Self {
             manager_logger: Arc::new(
@@ -101,12 +95,11 @@ impl Manager {
         };
         // Create Upstream
         {
-            let list = options.upstreams.into_list();
-            if list.is_empty() {
+            if options.upstreams.is_empty() {
                 return Err("missing upstream".into());
             }
             let mut locker = manager.upstreams.write().await;
-            for (i, o) in list.into_iter().enumerate() {
+            for (i, o) in options.upstreams.into_list().into_iter().enumerate() {
                 if o.tag.is_empty() {
                     return Err(format!("create upstream[{}] failed: missing tag", i).into());
                 }
@@ -130,12 +123,13 @@ impl Manager {
                 locker.1.insert(u.tag().to_string(), u);
             }
             super::upstream_topological_sort(&mut locker.0)?;
+            locker.0.shrink_to_fit();
+            locker.1.shrink_to_fit();
         }
         // Create Matcher Plugin
         {
-            let list = options.matcher_plugins.into_list();
             let mut locker = manager.matcher_plugins.write().await;
-            for (i, o) in list.into_iter().enumerate() {
+            for (i, o) in options.matcher_plugins.into_list().into_iter().enumerate() {
                 if o.tag.is_empty() {
                     return Err(format!("create matcher-plugin[{}] failed: missing tag", i).into());
                 }
@@ -160,7 +154,7 @@ impl Manager {
                         logger.into_box(),
                         o.tag,
                         o.r#type,
-                        o.options,
+                        o.options.unwrap_or(serde_yaml::Value::Null),
                     )
                     .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                         format!(
@@ -173,12 +167,13 @@ impl Manager {
                 locker.0.push(p.clone());
                 locker.1.insert(p.tag().to_string(), p);
             }
+            locker.0.shrink_to_fit();
+            locker.1.shrink_to_fit();
         }
         // Create Executor Plugin
         {
-            let list = options.executor_plugins.into_list();
             let mut locker = manager.executor_plugins.write().await;
-            for (i, o) in list.into_iter().enumerate() {
+            for (i, o) in options.executor_plugins.into_list().into_iter().enumerate() {
                 if o.tag.is_empty() {
                     return Err(format!("create executor-plugin[{}] failed: missing tag", i).into());
                 }
@@ -203,7 +198,7 @@ impl Manager {
                         logger.into_box(),
                         o.tag,
                         o.r#type,
-                        o.options,
+                        o.options.unwrap_or(serde_yaml::Value::Null),
                     )
                     .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                         format!(
@@ -216,15 +211,16 @@ impl Manager {
                 locker.0.push(p.clone());
                 locker.1.insert(p.tag().to_string(), p);
             }
+            locker.0.shrink_to_fit();
+            locker.1.shrink_to_fit();
         }
         // Create Workflow
         {
-            let list = options.workflows.into_list();
-            if list.is_empty() {
+            if options.workflows.is_empty() {
                 return Err("missing workflow".into());
             }
             let mut locker = manager.workflows.write().await;
-            for (i, o) in list.into_iter().enumerate() {
+            for (i, o) in options.workflows.into_list().into_iter().enumerate() {
                 if o.tag.is_empty() {
                     return Err(format!("create workflow[{}] failed: missing tag", i).into());
                 }
@@ -248,15 +244,16 @@ impl Manager {
                 locker.0.push(w.clone());
                 locker.1.insert(w.tag().to_string(), w);
             }
+            locker.0.shrink_to_fit();
+            locker.1.shrink_to_fit();
         }
         // Create Listener
         {
-            let list = options.listeners.into_list();
-            if list.is_empty() {
+            if options.listeners.is_empty() {
                 return Err("missing listener".into());
             }
             let mut l = manager.listeners.write().await;
-            for (i, o) in list.into_iter().enumerate() {
+            for (i, o) in options.listeners.into_list().into_iter().enumerate() {
                 if o.tag.is_empty() {
                     return Err(format!("create listener[{}] failed: missing tag", i).into());
                 }
@@ -275,6 +272,7 @@ impl Manager {
                 );
                 l.push(li);
             }
+            l.shrink_to_fit();
         }
 
         #[cfg(feature = "api")]

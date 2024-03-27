@@ -39,26 +39,7 @@ impl ExecItemRule {
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         match options {
             option::ExecItemRuleOptions::Mark(mark) => Ok(Self::Mark(mark)),
-            option::ExecItemRuleOptions::Metadata(m) => {
-                let mut map = HashMap::with_capacity(m.len());
-                for (k, v) in m {
-                    let k = if let serde_yaml::Value::String(k) = k {
-                        k
-                    } else {
-                        return Err(format!("invalid metadata: key: {:?}", k).into());
-                    };
-                    let kk = k.trim();
-                    if kk.is_empty() {
-                        return Err("invalid metadata: empty key".into());
-                    }
-                    if let serde_yaml::Value::String(v) = v {
-                        map.insert(kk.to_string(), v);
-                    } else {
-                        return Err(format!("invalid metadata: value: {:?}", v).into());
-                    }
-                }
-                Ok(Self::Metadata(map))
-            }
+            option::ExecItemRuleOptions::Metadata(m) => Ok(Self::Metadata(m)),
             option::ExecItemRuleOptions::SetTTL(ttl) => Ok(Self::SetTTL(ttl)),
             option::ExecItemRuleOptions::SetRespIP(list) => Ok(Self::SetRespIP(list.into_list())),
             option::ExecItemRuleOptions::Plugin(v) => Ok(Self::Plugin(RwLock::new(v.into()))),

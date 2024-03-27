@@ -19,7 +19,7 @@ impl FromStr for Domain {
                 }
                 match t {
                     "full" => Ok(Self::Full(s.to_string())),
-                    "suffix" => Ok(Self::Suffix(s.trim_start_matches('.').to_string())),
+                    "suffix" => Ok(Self::Suffix(s.to_string())),
                     "regex" => {
                         let s = match regex::Regex::from_str(s) {
                             Ok(v) => v,
@@ -100,7 +100,7 @@ impl DomainMatcher {
             match domain {
                 Domain::Full(s) => {
                     if suffix_key_map.insert(s.clone(), ()).is_none() {
-                        suffix_set_keys.push(Self::reverse_domain(s));
+                        suffix_set_keys.push(Self::reverse_domain(&s));
                     }
                 }
                 Domain::Suffix(s) => {
@@ -108,7 +108,7 @@ impl DomainMatcher {
                         if s.starts_with('.') {
                             suffix_set_keys.push(Self::reverse_domain_suffix(s));
                         } else {
-                            suffix_set_keys.push(Self::reverse_domain(s.clone()));
+                            suffix_set_keys.push(Self::reverse_domain(&s));
                             suffix_set_keys.push(Self::reverse_root_domain_suffix(s));
                         }
                     }
@@ -147,25 +147,26 @@ impl DomainMatcher {
     }
 
     pub(crate) fn find(&self, domain: &str) -> bool {
+        let domain_str = Self::reverse_domain(domain);
         if let Some(suffix_set) = &self.suffix_set {
-            if suffix_set.has(domain) {
+            if suffix_set.has(&domain_str) {
                 return true;
             }
         }
         if let Some(keywords) = &self.keywords {
-            if keywords.iter().any(|k| domain.contains(k)) {
+            if keywords.iter().any(|k| domain_str.contains(k)) {
                 return true;
             }
         }
         if let Some(regexs) = &self.regexs {
-            if regexs.iter().any(|r| r.is_match(domain)) {
+            if regexs.iter().any(|r| r.is_match(&domain_str)) {
                 return true;
             }
         }
         false
     }
 
-    fn reverse_domain(domain: String) -> String {
+    fn reverse_domain(domain: &str) -> String {
         domain.chars().rev().collect()
     }
 
@@ -185,14 +186,19 @@ impl DomainMatcher {
     }
 }
 
+/// From: https://github.com/SagerNet/sing/blob/dev/common/domain/set.go
 mod succinct {
     use std::collections::VecDeque;
 
     lazy_static::lazy_static! {
         static ref MARK: [u64; 65] = {
             let mut mark = [0u64; 65];
-            for i in 0..65 {
-                mark[i] = (1 << i) - 1;
+            for i in 0..=(u64::BITS as usize) {
+                if i != u64::BITS as usize {
+                    mark[i] = (1 << i) - 1;
+                } else {
+                    mark[i] = u64::MAX;
+                }
             }
             mark
         };
@@ -200,8 +206,12 @@ mod succinct {
         static ref RMARK: [u64; 64] = {
             let mut mark = [0u64; 64];
             let mut r_mark = [0u64; 64];
-            for i in 0..64 {
-                mark[i] = (1 << (i + 1)) - 1;
+            for i in 0..(u64::BITS as usize) {
+                if i != (u64::BITS - 1) as usize {
+                    mark[i] = (1 << (i + 1)) - 1;
+                } else {
+                    mark[i] = u64::MAX;
+                }
                 r_mark[i] = !mark[i];
             }
             r_mark
@@ -241,7 +251,7 @@ mod succinct {
             queue.push_back((0, keys.len(), 0));
             let mut i = 0;
             while let Some(mut elt) = queue.pop_front() {
-                if elt.2 == keys[elt.1].len() {
+                if elt.2 == keys[elt.0].len() {
                     elt.0 += 1;
                     Self::set_bit(&mut leaves, i, 1);
                 }

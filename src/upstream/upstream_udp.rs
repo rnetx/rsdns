@@ -1,7 +1,6 @@
 use std::{
     error::Error,
     io::{self, IoSlice},
-    net::SocketAddr,
     sync::Arc,
     time::Duration,
 };
@@ -80,40 +79,27 @@ impl UDPUpstream {
     }
 
     async fn new_tcp_stream(&self) -> io::Result<network::GenericTcpStream> {
-        let address = self.address.clone();
-        if address.is_domain_addr() && self.bootstrap.is_some() {
-            let (domain, port) = address.must_domain_addr();
-            let bootstrap = self.bootstrap.as_ref().unwrap();
-            debug!(self.logger, "lookup {}", domain);
-            let ips = bootstrap.lookup(domain).await.map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("lookup domain {} failed: {}", domain, err),
-                )
-            })?;
-            self.dialer.parallel_new_tcp_stream(ips, port).await
-        } else {
-            self.dialer.new_tcp_stream(address).await
-        }
+        super::Bootstrap::dial_with_bootstrap(
+            &self.logger,
+            self.address.clone(),
+            &self.bootstrap,
+            self.dialer.clone(),
+            |address, dialer| async move { dialer.new_tcp_stream(address).await },
+            |ips, port, dialer| async move { dialer.parallel_new_tcp_stream(ips, port).await },
+        )
+        .await
     }
 
     async fn new_udp_socket(&self) -> io::Result<(network::GenericUdpSocket, network::SocksAddr)> {
-        if self.address.is_domain_addr() && self.bootstrap.is_some() {
-            let (domain, port) = self.address.must_domain_addr();
-            let bootstrap = self.bootstrap.as_ref().unwrap();
-            debug!(self.logger, "lookup {}", domain);
-            let ips = bootstrap.lookup(domain).await.map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("lookup domain {} failed: {}", domain, err),
-                )
-            })?;
-            // TODO: Use First
-            let addr = network::SocksAddr::from(SocketAddr::new(ips[0], port));
-            self.dialer.new_udp_socket(&addr).await
-        } else {
-            self.dialer.new_udp_socket(&self.address).await
-        }
+        super::Bootstrap::dial_with_bootstrap(
+            &self.logger,
+            self.address.clone(),
+            &self.bootstrap,
+            self.dialer.clone(),
+            |address, dialer| async move { dialer.new_udp_socket(&address).await },
+            |ips, port, dialer| async move { dialer.parallel_new_udp_socket(ips, port).await },
+        )
+        .await
     }
 
     async fn exchange_udp(
@@ -147,7 +133,7 @@ impl UDPUpstream {
         udp_socket
             .send_to(&request_bytes, remote_addr.clone())
             .await?;
-        let mut buf = vec![0u8; 4096];
+        let mut buf = Vec::with_capacity(4096);
         udp_socket.recv_buf_from(&mut buf).await?;
         let result = Message::from_vec(&buf).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
             format!("deserialize response failed: {}", err).into()

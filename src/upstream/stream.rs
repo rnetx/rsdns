@@ -5,7 +5,7 @@ use std::{
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::{info, log};
+use crate::{debug, log};
 
 pub(super) struct LogStream<S> {
     logger: Arc<Box<dyn log::Logger>>,
@@ -95,6 +95,6 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for LogStream<S> {
 
 impl<S> Drop for LogStream<S> {
     fn drop(&mut self) {
-        info!(self.logger, "{}", self.message);
+        debug!(self.logger, "{}", self.message);
     }
 }

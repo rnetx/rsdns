@@ -80,9 +80,3 @@ impl Context {
         &mut self.metadata
     }
 }
-
-impl AsRef<log::Tracker> for Context {
-    fn as_ref(&self) -> &log::Tracker {
-        &self.log_tracker
-    }
-}

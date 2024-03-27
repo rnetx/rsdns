@@ -1,11 +1,11 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PluginOptions {
     pub tag: String,
     #[serde(rename = "type")]
     pub r#type: String,
     #[serde(flatten)]
     #[serde(default)]
-    pub options: serde_yaml::Value,
+    pub options: Option<serde_yaml::Value>,
 }

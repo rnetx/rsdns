@@ -1,8 +1,8 @@
 use std::{collections::HashMap, error::Error, sync::Arc};
 
-use hickory_proto::{op::Message, rr::RecordType};
+use hickory_proto::{op::{Message, MessageType, OpCode}, rr::RecordType};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::{sync::RwLock, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -10,7 +10,7 @@ use crate::{adapter, common, debug, error, log};
 
 pub(crate) const TYPE: &str = "prefer";
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Strategy {
     #[serde(rename = "prefer-ipv4")]
     PreferIPv4,
@@ -28,7 +28,7 @@ impl Default for Strategy {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct Options {
     upstream: String,
     #[serde(default)]
@@ -60,8 +60,11 @@ impl Prefer {
         manager: Arc<Box<dyn adapter::Manager>>,
         logger: Box<dyn log::Logger>,
         tag: String,
-        options: serde_yaml::Value,
+        mut options: serde_yaml::Value,
     ) -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>> {
+        if options.as_mapping().map(|m| m.len() == 0).unwrap_or(false) {
+            options = serde_yaml::Value::Null;
+        }
         let (upstream_tag, strategy) = if !options.is_null() {
             let options = Options::deserialize(options)
                 .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
@@ -103,6 +106,8 @@ impl Prefer {
     fn generate_extra_message(request: &Message, query_type: RecordType) -> Message {
         let mut new_request = Message::new();
         new_request.set_id(rand::thread_rng().gen());
+        new_request.set_op_code(OpCode::Query);
+        new_request.set_message_type(MessageType::Query);
         new_request.set_recursion_desired(true);
         if let Some(mut query) = request.query().cloned() {
             query.set_query_type(query_type);
@@ -145,8 +150,11 @@ impl adapter::ExecutorPlugin for Prefer {
 
     async fn prepare_workflow_args(
         &self,
-        args: serde_yaml::Value,
+        mut args: serde_yaml::Value,
     ) -> Result<u16, Box<dyn Error + Send + Sync>> {
+        if args.as_mapping().map(|m| m.len() == 0).unwrap_or(false) {
+            args = serde_yaml::Value::Null;
+        }
         let args = if !args.is_null() {
             let args = WorkflowArgsPrepare::deserialize(args)
                 .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {

@@ -226,6 +226,30 @@ impl Dialer {
             io::Error::new(io::ErrorKind::Other, "create new tcp stream failed")
         }))
     }
+
+    pub(crate) async fn parallel_new_udp_socket(
+        self: &Arc<Self>,
+        remote_ip_addr: Vec<IpAddr>,
+        port: u16,
+    ) -> io::Result<(GenericUdpSocket, super::SocksAddr)> {
+        // TODO: Use First IP
+        let addr = super::SocksAddr::SocketAddr(SocketAddr::new(remote_ip_addr[0], port));
+        self.new_udp_socket(&addr).await
+    }
+
+    #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+    pub(crate) async fn parallel_new_quic_connection(
+        &self,
+        remote_ip_addr: Vec<IpAddr>,
+        port: u16,
+        quic_client_config: quinn::ClientConfig,
+        server_name: &str,
+    ) -> io::Result<(quinn::Endpoint, quinn::Connection)> {
+        // TODO: Use First IP
+        let addr = super::SocksAddr::SocketAddr(SocketAddr::new(remote_ip_addr[0], port));
+        self.new_quic_connection(addr, quic_client_config, server_name)
+            .await
+    }
 }
 
 // Tcp

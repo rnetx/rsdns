@@ -9,7 +9,17 @@ use tokio::task::JoinSet;
 
 use crate::{adapter, log, option};
 
-struct NopManager;
+struct NopManager {
+    state_map: Arc<state::TypeMap![Send + Sync]>,
+}
+
+impl Default for NopManager {
+    fn default() -> Self {
+        Self {
+            state_map: Arc::new(<state::TypeMap![Send + Sync]>::new()),
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl adapter::Manager for NopManager {
@@ -21,36 +31,34 @@ impl adapter::Manager for NopManager {
         vec![]
     }
 
-    async fn fail_to_close(&self, _: String) {
-        todo!()
-    }
+    async fn fail_to_close(&self, _: String) {}
 
     async fn get_workflow(&self, _: &str) -> Option<Arc<Box<dyn adapter::Workflow>>> {
-        todo!()
+        None
     }
 
     async fn list_workflow(&self) -> Vec<Arc<Box<dyn adapter::Workflow>>> {
-        todo!()
+        vec![]
     }
 
     async fn get_matcher_plugin(&self, _: &str) -> Option<Arc<Box<dyn adapter::MatcherPlugin>>> {
-        todo!()
+        None
     }
 
     async fn list_matcher_plugin(&self) -> Vec<Arc<Box<dyn adapter::MatcherPlugin>>> {
-        todo!()
+        vec![]
     }
 
     async fn get_executor_plugin(&self, _: &str) -> Option<Arc<Box<dyn adapter::ExecutorPlugin>>> {
-        todo!()
+        None
     }
 
     async fn list_executor_plugin(&self) -> Vec<Arc<Box<dyn adapter::ExecutorPlugin>>> {
-        todo!()
+        vec![]
     }
 
     fn get_state_map(&self) -> &state::TypeMap![Send + Sync] {
-        todo!()
+        &self.state_map
     }
 
     fn api_enabled(&self) -> bool {
@@ -118,7 +126,7 @@ async fn test_message(upstream: &Arc<Box<dyn adapter::Upstream>>) {
 
 #[tokio::test]
 async fn test_upstream() {
-    let manager = Box::new(NopManager);
+    let manager = Box::new(NopManager::default());
     let basic_logger =
         log::BasicLogger::new(false, log::Level::Debug, Box::new(io::stdout())).into_box();
     let f = fs::File::open("/rsdns/test.yaml").unwrap();

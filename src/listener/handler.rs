@@ -33,7 +33,12 @@ pub(super) async fn handle(
         Some(timeout) => match tokio::time::timeout(timeout, execute_fut).await {
             Ok(res) => res,
             Err(e) => {
-                error!(logger, { tracker = ctx.as_ref() }, "query timeout: {}", e);
+                error!(
+                    logger,
+                    { tracker = ctx.log_tracker() },
+                    "query timeout: {}",
+                    e
+                );
                 return None;
             }
         },
@@ -42,7 +47,7 @@ pub(super) async fn handle(
     if let Err(e) = res {
         error!(
             logger,
-            { tracker = ctx.as_ref() },
+            { tracker = ctx.log_tracker() },
             "workflow [{}] execute failed: {}, peer_addr: {}",
             workflow.tag(),
             e,

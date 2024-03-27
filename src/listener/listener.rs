@@ -55,25 +55,40 @@ pub(crate) fn new_listener(
                 .map_err(|err| format!("create base listener [{}] failed: {}", tag, err).into())
         }
 
-        #[cfg(feature = "listener-tls-support")]
         option::ListenerInnerOptions::TLSListener(tls_options) => {
-            super::TLSListener::new(manager, logger, tag.clone(), tls_options)
-                .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                .map_err(|err| format!("create tls listener [{}] failed: {}", tag, err).into())
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "listener-tls-support")] {
+                    super::TLSListener::new(manager, logger, tag.clone(), tls_options)
+                        .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
+                        .map_err(|err| format!("create tls listener [{}] failed: {}", tag, err).into())
+                } else {
+                    Err("tls listener is not supported".into())
+                }
+            }
         }
 
-        #[cfg(feature = "listener-http-support")]
         option::ListenerInnerOptions::HTTPListener(http_options) => {
-            super::HTTPListener::new(manager, logger, tag.clone(), http_options)
-                .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                .map_err(|err| format!("create http listener [{}] failed: {}", tag, err).into())
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "listener-http-support")] {
+                    super::HTTPListener::new(manager, logger, tag.clone(), http_options)
+                        .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
+                        .map_err(|err| format!("create http listener [{}] failed: {}", tag, err).into())
+                } else {
+                    Err("http listener is not supported".into())
+                }
+            }
         }
 
-        #[cfg(all(feature = "listener-quic-support", feature = "listener-tls-support"))]
         option::ListenerInnerOptions::QUICListener(quic_options) => {
-            super::QUICListener::new(manager, logger, tag.clone(), quic_options)
-                .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                .map_err(|err| format!("create quic listener [{}] failed: {}", tag, err).into())
+            cfg_if::cfg_if! {
+                if #[cfg(all(feature = "listener-quic-support", feature = "listener-tls-support"))] {
+                    super::QUICListener::new(manager, logger, tag.clone(), quic_options)
+                        .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
+                        .map_err(|err| format!("create quic listener [{}] failed: {}", tag, err).into())
+                } else {
+                    Err("quic listener is not supported".into())
+                }
+            }
         }
     }
 }

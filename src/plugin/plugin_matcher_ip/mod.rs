@@ -1,7 +1,7 @@
 use std::{collections::HashMap, error::Error, net::IpAddr, str::FromStr, sync::Arc};
 
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt},
@@ -12,21 +12,21 @@ use crate::{adapter, common, debug, log};
 
 pub(crate) const TYPE: &str = "ip";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct Options {
     #[serde(default)]
-    rule: Option<common::Listable<String>>,
+    rule: common::SingleOrList<String>,
     #[serde(default)]
-    file: Option<common::Listable<String>>,
+    file: common::SingleOrList<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Deserialize, Clone, Default)]
 struct WorkflowArgs {
     #[serde(default)]
     mode: WorkflowMode,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy)]
 enum WorkflowMode {
     #[serde(rename = "match-response-ip")]
     MatchResponseIP,
@@ -61,13 +61,12 @@ impl IP {
                 format!("failed to deserialize options: {}", err).into()
             })?;
         let logger = Arc::new(logger);
-        if options.rule.is_none() && options.file.is_none() {
+        if options.rule.len() == 0 && options.file.len() == 0 {
             return Err("missing rule or file".into());
         }
-        let inner_rule_reader = if let Some(ip) = options.rule {
-            let list = ip.into_list();
-            let mut ip_map = HashMap::with_capacity(list.len());
-            for ip in list {
+        let inner_rule_reader = if options.rule.len() > 0 {
+            let mut ip_map = HashMap::with_capacity(options.rule.len());
+            for ip in options.rule.into_list() {
                 match ip.parse::<common::IPRange>() {
                     Ok(v) => {
                         ip_map.insert(v, ());
@@ -86,7 +85,13 @@ impl IP {
             tag,
             logger,
             inner_rule_reader,
-            files: Arc::new(options.file.map(|v| v.into_list())),
+            files: Arc::new({
+                if options.file.len() > 0 {
+                    Some(options.file.into_list())
+                } else {
+                    None
+                }
+            }),
             file_rule_reader: Arc::new(RwLock::new(None)),
             args_map: RwLock::new(HashMap::new()),
         };
@@ -204,9 +209,14 @@ impl adapter::MatcherPlugin for IP {
 
     async fn prepare_workflow_args(
         &self,
-        args: serde_yaml::Value,
+        mut args: serde_yaml::Value,
     ) -> Result<u16, Box<dyn Error + Send + Sync>> {
-        let args = if args.is_string() {
+        if args.as_mapping().map(|m| m.len() == 0).unwrap_or(false) {
+            args = serde_yaml::Value::Null;
+        }
+        let args = if args.is_null() {
+            WorkflowArgs::default()
+        } else if args.is_string() {
             WorkflowMode::deserialize(args)
                 .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
                     format!("failed to deserialize args: {}", err).into()

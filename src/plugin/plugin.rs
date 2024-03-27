@@ -131,6 +131,12 @@ lazy_static::lazy_static! {
         m.register(TYPE, MaxmindDB::new);
     }
 
+    #[cfg(feature = "plugin-matcher-script")]
+    {
+        use super::plugin_matcher_script::{Script, TYPE};
+        m.register(TYPE, Script::new);
+    }
+
     m
   };
 
@@ -143,10 +149,25 @@ lazy_static::lazy_static! {
         m.register(TYPE, Cache::new);
     }
 
+    #[cfg(all(
+        feature = "plugin-executor-ipset",
+        any(target_os = "linux", target_os = "android")
+    ))]
+    {
+        use super::plugin_executor_ipset::{IPSet, TYPE};
+        m.register(TYPE, IPSet::new);
+    }
+
     #[cfg(feature = "plugin-executor-prefer")]
     {
         use super::plugin_executor_prefer::{Prefer, TYPE};
         m.register(TYPE, Prefer::new);
+    }
+
+    #[cfg(feature = "plugin-executor-script")]
+    {
+        use super::plugin_executor_script::{Script, TYPE};
+        m.register(TYPE, Script::new);
     }
 
     m

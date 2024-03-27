@@ -14,87 +14,10 @@ impl MatchItemRule {
     pub(super) fn new(
         options: option::MatchItemRuleOptions,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let (inner, invert) = match options {
-            option::MatchItemRuleOptions::Listener(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Listener(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertListener(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Listener(v))?,
-                true,
-            ),
-            option::MatchItemRuleOptions::ClientIP(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::ClientIP(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertClientIP(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::ClientIP(v))?,
-                true,
-            ),
-            option::MatchItemRuleOptions::QType(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::QType(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertQType(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::QType(v))?,
-                true,
-            ),
-            option::MatchItemRuleOptions::QName(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::QName(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertQName(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::QName(v))?,
-                true,
-            ),
-            option::MatchItemRuleOptions::HasRespMsg(v) => {
-                (MatchItemInnerRule::HasRespMsg(v), false)
-            }
-            option::MatchItemRuleOptions::InvertHasRespMsg(v) => {
-                (MatchItemInnerRule::HasRespMsg(v), true)
-            }
-            option::MatchItemRuleOptions::RespIP(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::RespIP(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertRespIP(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::RespIP(v))?,
-                true,
-            ),
-            option::MatchItemRuleOptions::Mark(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Mark(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertMark(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Mark(v))?,
-                true,
-            ),
-            option::MatchItemRuleOptions::Metadata(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Metadata(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertMetadata(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Metadata(v))?,
-                true,
-            ),
-            option::MatchItemRuleOptions::Env(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Env(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertEnv(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Env(v))?,
-                true,
-            ),
-            option::MatchItemRuleOptions::Plugin(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Plugin(v))?,
-                false,
-            ),
-            option::MatchItemRuleOptions::InvertPlugin(v) => (
-                MatchItemInnerRule::new(option::MatchItemRuleOptions::Plugin(v))?,
-                true,
-            ),
-        };
-        Ok(Self { invert, inner })
+        Ok(Self {
+            invert: options.invert,
+            inner: MatchItemInnerRule::new(options.options)?,
+        })
     }
 
     pub(super) async fn check(
@@ -139,12 +62,13 @@ enum MatchItemInnerRule {
 }
 
 impl MatchItemInnerRule {
-    fn new(options: option::MatchItemRuleOptions) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    fn new(
+        options: option::MatchItemWrapperRuleOptions,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         match options {
-            option::MatchItemRuleOptions::Listener(list) => {
-                let list = list.into_list();
+            option::MatchItemWrapperRuleOptions::Listener(list) => {
                 let mut map = HashMap::with_capacity(list.len());
-                for item in list {
+                for item in list.into_list() {
                     let item_str = item.trim();
                     if !item_str.is_empty() {
                         map.insert(item_str.to_string(), ());
@@ -152,10 +76,9 @@ impl MatchItemInnerRule {
                 }
                 Ok(Self::Listener(map))
             }
-            option::MatchItemRuleOptions::ClientIP(list) => {
-                let list = list.into_list();
+            option::MatchItemWrapperRuleOptions::ClientIP(list) => {
                 let mut l = Vec::with_capacity(list.len());
-                for item in list {
+                for item in list.into_list() {
                     let item_str = item.trim();
                     if !item_str.is_empty() {
                         let range = common::IPRange::from_str(item_str)
@@ -165,10 +88,9 @@ impl MatchItemInnerRule {
                 }
                 Ok(Self::ClientIP(l))
             }
-            option::MatchItemRuleOptions::QType(list) => {
-                let list = list.into_list();
+            option::MatchItemWrapperRuleOptions::QType(list) => {
                 let mut map = HashMap::with_capacity(list.len());
-                for item in list {
+                for item in list.into_list() {
                     match item {
                         serde_yaml::Value::Number(n) => {
                             if let Some(n) = n.as_u64() {
@@ -193,10 +115,9 @@ impl MatchItemInnerRule {
                 }
                 Ok(Self::QType(map))
             }
-            option::MatchItemRuleOptions::QName(list) => {
-                let list = list.into_list();
+            option::MatchItemWrapperRuleOptions::QName(list) => {
                 let mut map = HashMap::with_capacity(list.len());
-                for item in list {
+                for item in list.into_list() {
                     let item_str = item.trim();
                     if !item_str.is_empty() {
                         let name = Name::from_str(item_str)
@@ -206,11 +127,10 @@ impl MatchItemInnerRule {
                 }
                 Ok(Self::QName(map))
             }
-            option::MatchItemRuleOptions::HasRespMsg(b) => Ok(Self::HasRespMsg(b)),
-            option::MatchItemRuleOptions::RespIP(list) => {
-                let list = list.into_list();
+            option::MatchItemWrapperRuleOptions::HasRespMsg(b) => Ok(Self::HasRespMsg(b)),
+            option::MatchItemWrapperRuleOptions::RespIP(list) => {
                 let mut l = Vec::with_capacity(list.len());
-                for item in list {
+                for item in list.into_list() {
                     let item_str = item.trim();
                     if !item_str.is_empty() {
                         let range = common::IPRange::from_str(item_str)
@@ -220,56 +140,18 @@ impl MatchItemInnerRule {
                 }
                 Ok(Self::RespIP(l))
             }
-            option::MatchItemRuleOptions::Mark(list) => {
-                let list = list.into_list();
+            option::MatchItemWrapperRuleOptions::Mark(list) => {
                 let mut map = HashMap::with_capacity(list.len());
-                for item in list {
+                for item in list.into_list() {
                     map.insert(item, ());
                 }
                 Ok(Self::Mark(map))
             }
-            option::MatchItemRuleOptions::Metadata(m) => {
-                let mut map = HashMap::with_capacity(m.len());
-                for (k, v) in m {
-                    let k = if let serde_yaml::Value::String(k) = k {
-                        k
-                    } else {
-                        return Err(format!("invalid metadata: key: {:?}", k).into());
-                    };
-                    let kk = k.trim();
-                    if kk.is_empty() {
-                        return Err("invalid metadata: empty key".into());
-                    }
-                    if let serde_yaml::Value::String(v) = v {
-                        map.insert(kk.to_string(), v);
-                    } else {
-                        return Err(format!("invalid metadata: value: {:?}", v).into());
-                    }
-                }
-                Ok(Self::Metadata(map))
+            option::MatchItemWrapperRuleOptions::Metadata(m) => Ok(Self::Metadata(m)),
+            option::MatchItemWrapperRuleOptions::Env(m) => Ok(Self::Env(m)),
+            option::MatchItemWrapperRuleOptions::Plugin(v) => {
+                Ok(Self::Plugin(RwLock::new(v.into())))
             }
-            option::MatchItemRuleOptions::Env(m) => {
-                let mut map = HashMap::with_capacity(m.len());
-                for (k, v) in m {
-                    let k = if let serde_yaml::Value::String(k) = k {
-                        k
-                    } else {
-                        return Err(format!("invalid env: key: {:?}", k).into());
-                    };
-                    let kk = k.trim();
-                    if kk.is_empty() {
-                        return Err("invalid env: empty key".into());
-                    }
-                    if let serde_yaml::Value::String(v) = v {
-                        map.insert(kk.to_string(), v);
-                    } else {
-                        return Err(format!("invalid env: value: {:?}", v).into());
-                    }
-                }
-                Ok(Self::Env(map))
-            }
-            option::MatchItemRuleOptions::Plugin(v) => Ok(Self::Plugin(RwLock::new(v.into()))),
-            _ => unreachable!(),
         }
     }
 

@@ -44,44 +44,64 @@ pub(crate) fn new_upstream(
                 .map_err(|err| format!("create tcp upstream [{}] failed: {}", tag, err).into())
         }
 
-        #[cfg(feature = "upstream-dhcp-support")]
         option::UpstreamInnerOptions::DHCPUpstream(dhcp_options) => {
-            super::DHCPUpstream::new(manager, logger, tag.clone(), dhcp_options)
-                .map(|u| {
-                    Box::new(GenericUpstream::new(u, options.query_timeout))
-                        as Box<dyn adapter::Upstream>
-                })
-                .map_err(|err| format!("create dhcp upstream [{}] failed: {}", tag, err).into())
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "upstream-dhcp-support")] {
+                    super::DHCPUpstream::new(manager, logger, tag.clone(), dhcp_options)
+                        .map(|u| {
+                            Box::new(GenericUpstream::new(u, options.query_timeout))
+                                as Box<dyn adapter::Upstream>
+                        })
+                        .map_err(|err| format!("create dhcp upstream [{}] failed: {}", tag, err).into())
+                } else {
+                    Err("dhcp upstream is not supported".into())
+                }
+            }
         }
 
-        #[cfg(feature = "upstream-tls-support")]
         option::UpstreamInnerOptions::TLSUpstream(tls_options) => {
-            super::TLSUpstream::new(manager, logger, tag.clone(), tls_options)
-                .map(|u| {
-                    Box::new(GenericUpstream::new(u, options.query_timeout))
-                        as Box<dyn adapter::Upstream>
-                })
-                .map_err(|err| format!("create tls upstream [{}] failed: {}", tag, err).into())
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "upstream-tls-support")] {
+                    super::TLSUpstream::new(manager, logger, tag.clone(), tls_options)
+                        .map(|u| {
+                            Box::new(GenericUpstream::new(u, options.query_timeout))
+                                as Box<dyn adapter::Upstream>
+                        })
+                        .map_err(|err| format!("create tls upstream [{}] failed: {}", tag, err).into())
+                } else {
+                    Err("tls upstream is not supported".into())
+                }
+            }
         }
 
-        #[cfg(all(feature = "upstream-https-support", feature = "upstream-tls-support"))]
         option::UpstreamInnerOptions::HTTPSUpstream(https_options) => {
-            super::HTTPSUpstream::new(manager, logger, tag.clone(), https_options)
-                .map(|u| {
-                    Box::new(GenericUpstream::new(u, options.query_timeout))
-                        as Box<dyn adapter::Upstream>
-                })
-                .map_err(|err| format!("create https upstream [{}] failed: {}", tag, err).into())
+            cfg_if::cfg_if! {
+                if #[cfg(all(feature = "upstream-https-support", feature = "upstream-tls-support"))] {
+                    super::HTTPSUpstream::new(manager, logger, tag.clone(), https_options)
+                        .map(|u| {
+                            Box::new(GenericUpstream::new(u, options.query_timeout))
+                                as Box<dyn adapter::Upstream>
+                        })
+                        .map_err(|err| format!("create https upstream [{}] failed: {}", tag, err).into())
+                } else {
+                    Err("https upstream is not supported".into())
+                }
+            }
         }
 
-        #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
         option::UpstreamInnerOptions::QUICUpstream(quic_options) => {
-            super::QUICUpstream::new(manager, logger, tag.clone(), quic_options)
-                .map(|u| {
-                    Box::new(GenericUpstream::new(u, options.query_timeout))
-                        as Box<dyn adapter::Upstream>
-                })
-                .map_err(|err| format!("create quic upstream [{}] failed: {}", tag, err).into())
+            cfg_if::cfg_if! {
+                if #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))] {
+                    super::QUICUpstream::new(manager, logger, tag.clone(), quic_options)
+                        .map(|u| {
+                            Box::new(GenericUpstream::new(u, options.query_timeout))
+                                as Box<dyn adapter::Upstream>
+                        })
+                        .map_err(|err| format!("create quic upstream [{}] failed: {}", tag, err).into())
+                } else {
+                    Err("quic upstream is not supported".into())
+                }
+            }
         }
     }
 }

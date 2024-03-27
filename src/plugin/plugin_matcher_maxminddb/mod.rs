@@ -1,20 +1,20 @@
 use std::{collections::HashMap, error::Error, net::IpAddr, path::PathBuf, sync::Arc};
 
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::RwLock;
 
 use crate::{adapter, common, debug, log};
 
 pub(crate) const TYPE: &str = "maxminddb";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct Options {
     path: String,
     mode: Mode,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy)]
 enum Mode {
     #[serde(rename = "sing-box")]
     SingBox,
@@ -33,14 +33,14 @@ pub(crate) struct MaxmindDB {
     reader: Arc<RwLock<Option<maxminddb::Reader<Vec<u8>>>>>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 struct WorkflowArgs {
     #[serde(default)]
     mode: WorkflowMode,
-    tag: common::Listable<String>,
+    tag: common::SingleOrList<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy)]
 enum WorkflowMode {
     #[serde(rename = "match-response-ip")]
     MatchResponseIP,

@@ -8,25 +8,20 @@ pub(super) fn new_tls_config(
     let config_builder = tokio_rustls::rustls::ServerConfig::builder();
 
     let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
-    if let Some(ca_files) = options.client_ca_file {
-        let ca_files = ca_files.into_list();
-        for f in ca_files {
-            let file = fs::File::open(&f)
-                .map_err(|err| format!("tls: failed to open server-ca-file {}: {}", f, err))?;
-            let mut reader = BufReader::new(file);
-            let mut cer_list = Vec::new();
-            for cer in rustls_pemfile::certs(&mut reader) {
-                match cer {
-                    Ok(cert) => cer_list.push(cert),
-                    Err(e) => {
-                        return Err(
-                            format!("tls: failed to parse server-ca-file {}: {}", f, e).into()
-                        );
-                    }
+    for f in options.client_ca_file.into_list() {
+        let file = fs::File::open(&f)
+            .map_err(|err| format!("tls: failed to open server-ca-file {}: {}", f, err))?;
+        let mut reader = BufReader::new(file);
+        let mut cer_list = Vec::new();
+        for cer in rustls_pemfile::certs(&mut reader) {
+            match cer {
+                Ok(cert) => cer_list.push(cert),
+                Err(e) => {
+                    return Err(format!("tls: failed to parse server-ca-file {}: {}", f, e).into());
                 }
             }
-            root_store.add_parsable_certificates(&cer_list);
         }
+        root_store.add_parsable_certificates(&cer_list);
     }
 
     let config_builder = config_builder

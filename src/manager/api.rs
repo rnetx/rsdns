@@ -38,10 +38,9 @@ impl APIServer {
             router = router.route(
                 "/api/v1/version",
                 axum::routing::get(|| async {
-                    let (version, git_commit_id) = crate::get_app_version();
                     let mut data = HashMap::with_capacity(2);
-                    data.insert("version", version);
-                    data.insert("git_commit_id", git_commit_id);
+                    data.insert("version", crate::build_info::PKG_VERSION);
+                    data.insert("git_commit_id", crate::build_info::SHORT_COMMIT);
                     common::GenericResponse::new(http::StatusCode::OK, data)
                 }),
             );

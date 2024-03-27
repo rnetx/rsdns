@@ -11,12 +11,12 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::sync::Notify;
 
 use crate::common;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize)]
 pub(crate) struct UpstreamStatisticEncodeData {
     pub(crate) tag: String,
     #[serde(rename = "type")]

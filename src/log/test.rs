@@ -25,7 +25,7 @@ fn test_macro() {
     fatal!(basic, { tracker = tracker }, "test");
     fatal!(
         basic,
-        { option_tracker = ctx_ref.map(|w| w.as_ref()) },
+        { option_tracker = ctx_ref.map(|w| w.log_tracker().as_ref()) },
         "test"
     );
 }

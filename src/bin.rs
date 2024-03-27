@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Parser)]
-#[command(about = "a custom dns server", long_about = None)]
+#[command(about = rsdns::build_info::PKG_DESCRIPTION, long_about = None)]
 struct Cli {
     #[command(flatten)]
     args: GlobalArgs,
@@ -17,7 +17,7 @@ struct Cli {
 
 #[derive(Debug, Args)]
 struct GlobalArgs {
-    #[clap(help = "config file path", short, long, default_value = "config.yaml")]
+    #[clap(help = "config path", short, long, default_value = "config.yaml")]
     config: String,
 }
 
@@ -35,15 +35,18 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Version => {
-            let (version, git_commit_id) = rsdns::get_app_version();
-            println!("rsdns {}-{}", version, git_commit_id);
+            println!(
+                "rsdns v{}-{}",
+                rsdns::build_info::PKG_VERSION,
+                rsdns::build_info::SHORT_COMMIT
+            );
         }
         Commands::Run => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap();
-            if let Err(_) = rt.block_on(run(cli.args.config)) {
+            if rt.block_on(run(cli.args.config)).is_err() {
                 exit(1);
             }
         }

@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct APIServerOptions {
     pub listen: SocketAddr,
     pub secret: Option<String>,

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, error::Error, sync::Arc};
 
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::RwLock;
 
 use crate::{adapter, debug, log};
@@ -10,7 +10,7 @@ pub(crate) const TYPE: &str = "cache";
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "plugin-executor-cache-redis")] {
-        #[derive(Serialize, Deserialize)]
+        #[derive( Deserialize)]
         #[serde(tag = "mode")]
         enum Options {
             #[serde(rename = "memory")]
@@ -20,7 +20,7 @@ cfg_if::cfg_if! {
             Redis(redis_cache::Options),
         }
     } else {
-        #[derive(Serialize, Deserialize)]
+        #[derive( Deserialize)]
         #[serde(tag = "mode")]
         enum Options {
             #[serde(rename = "memory")]
@@ -36,7 +36,7 @@ pub(crate) struct Cache {
     args_map: RwLock<HashMap<u16, WorkflowArgs>>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Deserialize, Clone, Copy)]
 #[serde(tag = "mode")]
 enum WorkflowArgs {
     #[serde(rename = "restore")]
@@ -339,7 +339,7 @@ mod memory_cache {
 
     use chrono::{DateTime, Local};
     use hickory_proto::op::{Message, Query};
-    use serde::{Deserialize, Serialize};
+    use serde::Deserialize;
     use tokio::{
         fs::{self, File},
         io::{self, AsyncWriteExt},
@@ -348,7 +348,7 @@ mod memory_cache {
 
     use crate::{common, debug, error, log};
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Deserialize)]
     pub(crate) struct Options {
         #[serde(rename = "max-size")]
         #[serde(default)]
@@ -664,12 +664,12 @@ mod redis_cache {
 
     use hickory_proto::op::{Message, Query};
     use redis::AsyncCommands;
-    use serde::{Deserialize, Serialize};
+    use serde::Deserialize;
     use tokio::sync::RwLock;
 
     use crate::log;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Deserialize)]
     pub(crate) struct Options {
         server: String,
         #[serde(default)]

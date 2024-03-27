@@ -1,5 +1,5 @@
 use hickory_proto::{
-    op::{Message, ResponseCode},
+    op::{Message, MessageType, ResponseCode},
     rr::{rdata::SOA, RData, Record, RecordType},
 };
 
@@ -18,6 +18,7 @@ pub(crate) fn generate_empty_message(request: &Message) -> Message {
     ))));
     let mut response = Message::new();
     response.set_id(request.id());
+    response.set_message_type(MessageType::Response);
     response.set_op_code(request.op_code());
     response.add_query(query.unwrap().clone());
     response.add_name_server(answer);

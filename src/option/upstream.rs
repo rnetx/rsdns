@@ -4,11 +4,11 @@ use std::{
     time::Duration,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::common;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct UpstreamOptions {
     pub tag: String,
     #[serde(flatten)]
@@ -19,7 +19,7 @@ pub struct UpstreamOptions {
     pub query_timeout: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum UpstreamInnerOptions {
     #[serde(alias = "tcp")]
@@ -36,7 +36,7 @@ pub enum UpstreamInnerOptions {
     QUICUpstream(QUICUpstreamOptions),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct UDPUpstreamOptions {
     pub address: String,
     #[serde(rename = "idle-timeout")]
@@ -56,7 +56,7 @@ pub struct UDPUpstreamOptions {
     pub dialer: Option<DialerOptions>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TCPUpstreamOptions {
     pub address: String,
     #[serde(rename = "idle-timeout")]
@@ -73,7 +73,7 @@ pub struct TCPUpstreamOptions {
     pub dialer: Option<DialerOptions>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DHCPUpstreamOptions {
     pub interface: String,
     #[serde(rename = "check-interval")]
@@ -89,7 +89,7 @@ pub struct DHCPUpstreamOptions {
     pub enable_pipeline: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TLSUpstreamOptions {
     pub address: String,
     #[serde(rename = "idle-timeout")]
@@ -109,7 +109,7 @@ pub struct TLSUpstreamOptions {
     pub dialer: Option<DialerOptions>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct HTTPSUpstreamOptions {
     pub address: String,
     #[serde(rename = "idle-timeout")]
@@ -138,13 +138,16 @@ pub struct HTTPSUpstreamOptions {
     pub dialer: Option<DialerOptions>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct QUICUpstreamOptions {
     pub address: String,
     #[serde(rename = "idle-timeout")]
     #[serde(default)]
     #[serde(deserialize_with = "duration_str::deserialize_option_duration")]
     pub idle_timeout: Option<Duration>,
+    #[serde(rename = "disable-add-prefix")]
+    #[serde(default)]
+    pub disable_add_prefix: bool,
     #[serde(default)]
     #[serde(flatten)]
     pub tls: UpstreamTLSOptions,
@@ -157,14 +160,14 @@ pub struct QUICUpstreamOptions {
 
 // TLS
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpstreamTLSOptions {
     #[serde(rename = "server-name")]
     #[serde(default)]
     pub server_name: Option<String>,
     #[serde(rename = "server-ca-file")]
     #[serde(default)]
-    pub server_ca_file: Option<common::Listable<String>>,
+    pub server_ca_file: common::SingleOrList<String>,
     #[serde(rename = "client-cert-file")]
     #[serde(default)]
     pub client_cert_file: Option<String>,
@@ -175,15 +178,14 @@ pub struct UpstreamTLSOptions {
 
 // Bootstrap
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct BootstrapOptions {
     #[serde(default)]
     pub strategy: BootstrapStrategy,
     pub upstream: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum BootstrapStrategy {
     #[serde(rename = "prefer-ipv4")]
     PreferIPv4,
@@ -203,7 +205,7 @@ impl Default for BootstrapStrategy {
 
 // Dialer
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct DialerOptions {
     #[serde(flatten)]
     #[serde(default)]
@@ -216,7 +218,7 @@ pub struct DialerOptions {
 
 // Dialer - Basic
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct BasicDialerOptions {
     #[serde(default)]
     #[serde(rename = "bind-ipv4")]
@@ -237,7 +239,7 @@ pub struct BasicDialerOptions {
 
 // Dialer - Socks5
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Socks5DialerOptions {
     pub address: SocketAddr,
     #[serde(default)]

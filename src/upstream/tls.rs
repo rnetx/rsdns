@@ -8,9 +8,8 @@ pub(super) fn new_tls_config(
     let config_builder = tokio_rustls::rustls::ClientConfig::builder();
 
     let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
-    if let Some(ca_files) = options.server_ca_file {
-        let ca_files = ca_files.into_list();
-        for f in ca_files {
+    if options.server_ca_file.len() > 0 {
+        for f in options.server_ca_file.into_list() {
             let file = fs::File::open(&f)
                 .map_err(|err| format!("tls: failed to open server-ca-file {}: {}", f, err))?;
             let mut reader = BufReader::new(file);
