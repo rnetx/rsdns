@@ -1,10 +1,11 @@
-use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use crate::{adapter, common, fatal, info, log, option};
 use hickory_proto::op::Message;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, Mutex},
+    task::JoinSet,
 };
 
 const UDP_LISTENER_TYPE: &str = "udp";
@@ -25,14 +26,11 @@ impl UDPListener {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: option::UDPListenerOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let listen = super::parse_with_default_port(&options.listen, 53).map_err::<Box<
-            dyn Error + Send + Sync,
-        >, _>(|err| {
-            format!("invalid listen: {}", err).into()
-        })?;
+    ) -> anyhow::Result<Self> {
+        let listen = super::parse_with_default_port(&options.listen, 53)
+            .map_err(|err| anyhow::anyhow!("invalid listen: {}", err))?;
         if options.generic.workflow.is_empty() {
-            return Err("missing workflow".into());
+            return Err(anyhow::anyhow!("missing workflow"));
         }
         Ok(Self {
             manager,
@@ -55,6 +53,7 @@ impl UDPListener {
         canceller_guard: common::CancellerGuard,
     ) {
         let (sender, mut receiver) = mpsc::channel(64);
+        let mut join_set = JoinSet::new();
         let mut buffer = vec![0u8; 4096];
         loop {
             tokio::select! {
@@ -69,7 +68,7 @@ impl UDPListener {
                             let sender = sender.clone();
                             let canceller_guard = canceller_guard.clone();
                             let listener_tag = listener_tag.clone();
-                            tokio::spawn(async move {
+                            join_set.spawn(async move {
                                 let fut = async move {
                                     if let Ok(request) = Message::from_vec(&buf) {
                                         if let Some(response) = super::handle(workflow, logger, listener_tag, query_timeout, peer_addr.ip(), request).await {
@@ -84,6 +83,7 @@ impl UDPListener {
                                     _ = canceller_guard.cancelled() => {}
                                 }
                             });
+                            while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
                         }
                         Err(e) => {
                             if !canceller_guard.is_cancelled() {
@@ -111,17 +111,21 @@ impl UDPListener {
         }
         drop(sender);
         receiver.recv().await;
+        join_set.shutdown().await;
     }
 }
 
 #[async_trait::async_trait]
 impl adapter::Common for UDPListener {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let workflow = self
-            .manager
-            .get_workflow(&self.workflow_tag)
-            .await
-            .ok_or(format!("workflow [{}] not found", self.workflow_tag))?;
+    async fn start(&self) -> anyhow::Result<()> {
+        let workflow =
+            self.manager
+                .get_workflow(&self.workflow_tag)
+                .await
+                .ok_or(anyhow::anyhow!(
+                    "workflow [{}] not found",
+                    self.workflow_tag
+                ))?;
         let udp_socket = UdpSocket::bind(&self.listen).await?;
         info!(self.logger, "UDP socket listen on {}", self.listen,);
         let (canceller, canceller_guard) = common::new_canceller();
@@ -145,7 +149,7 @@ impl adapter::Common for UDPListener {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if let Some(mut canceller) = self.canceller.lock().await.take() {
             canceller.cancel_and_wait().await;
         }

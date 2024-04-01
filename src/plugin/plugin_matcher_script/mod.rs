@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    error::Error,
     process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -62,11 +61,9 @@ impl Script {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: serde_yaml::Value,
-    ) -> Result<Box<dyn adapter::MatcherPlugin>, Box<dyn Error + Send + Sync>> {
-        let options =
-            Options::deserialize(options).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize options: {}", err).into()
-            })?;
+    ) -> anyhow::Result<Box<dyn adapter::MatcherPlugin>> {
+        let options = Options::deserialize(options)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize options: {}", err))?;
         let logger = Arc::new(logger);
         let s = Self {
             tag,
@@ -211,6 +208,7 @@ impl Script {
                     break;
                   }
                   _ = token.cancelled() => {
+                    child.start_kill().ok();
                     break;
                   }
                 }
@@ -224,6 +222,7 @@ impl Script {
                     break;
                   }
                   _ = token.cancelled() => {
+                    child.start_kill().ok();
                     break;
                   }
                 }
@@ -262,7 +261,7 @@ impl Script {
 
 #[async_trait::async_trait]
 impl adapter::Common for Script {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         let s = self.clone();
         let (canceller, canceller_guard) = common::new_canceller();
         tokio::spawn(s.handle(canceller_guard));
@@ -270,7 +269,7 @@ impl adapter::Common for Script {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if let Some(mut canceller) = self.canceller.lock().await.take() {
             canceller.cancel_and_wait().await;
         }
@@ -288,18 +287,11 @@ impl adapter::MatcherPlugin for Script {
         TYPE
     }
 
-    async fn prepare_workflow_args(
-        &self,
-        _: serde_yaml::Value,
-    ) -> Result<u16, Box<dyn Error + Send + Sync>> {
+    async fn prepare_workflow_args(&self, _: serde_yaml::Value) -> anyhow::Result<u16> {
         Ok(0)
     }
 
-    async fn r#match(
-        &self,
-        _: &mut adapter::Context,
-        _: u16,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    async fn r#match(&self, _: &mut adapter::Context, _: u16) -> anyhow::Result<bool> {
         let result = self.match_flag.load(Ordering::Relaxed);
         if result {
             debug!(self.logger, "matched");

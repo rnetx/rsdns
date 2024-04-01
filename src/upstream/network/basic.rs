@@ -16,7 +16,7 @@ pub(super) struct BasicDialer {
     tcp_fast_open: bool,
     so_mark: Option<u32>,
 
-    #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+    #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
     quic_endpoint_config: quinn::EndpointConfig,
 }
 
@@ -33,7 +33,7 @@ impl BasicDialer {
             tcp_fast_open: options.tcp_fast_open,
             so_mark: options.so_mark,
 
-            #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+            #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
             quic_endpoint_config: quinn::EndpointConfig::default(),
         }
     }
@@ -144,7 +144,7 @@ impl BasicDialer {
         Ok(udp_socket)
     }
 
-    #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+    #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
     pub(super) async fn new_quic_connection(
         &self,
         remote_addr: SocketAddr,

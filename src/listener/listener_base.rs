@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     io::IoSlice,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
@@ -33,12 +32,12 @@ impl BaseListener {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: option::BaseListenerOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         if options.listen_port == 0 {
-            return Err("missing listen-port".into());
+            return Err(anyhow::anyhow!("missing listen-port"));
         }
         if options.generic.workflow.is_empty() {
-            return Err("missing workflow".into());
+            return Err(anyhow::anyhow!("missing workflow"));
         }
         Ok(Self {
             manager,
@@ -272,12 +271,15 @@ impl BaseListener {
 
 #[async_trait::async_trait]
 impl adapter::Common for BaseListener {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let workflow = self
-            .manager
-            .get_workflow(&self.workflow_tag)
-            .await
-            .ok_or(format!("workflow [{}] not found", self.workflow_tag))?;
+    async fn start(&self) -> anyhow::Result<()> {
+        let workflow =
+            self.manager
+                .get_workflow(&self.workflow_tag)
+                .await
+                .ok_or(anyhow::anyhow!(
+                    "workflow [{}] not found",
+                    self.workflow_tag
+                ))?;
         let (canceller, canceller_guard) = common::new_canceller();
         {
             // UDP IPv4
@@ -381,7 +383,7 @@ impl adapter::Common for BaseListener {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if let Some(mut canceller) = self.canceller.lock().await.take() {
             canceller.cancel_and_wait().await;
         }

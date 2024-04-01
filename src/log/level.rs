@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, str::FromStr};
+use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
@@ -40,7 +40,7 @@ impl fmt::Display for Level {
 }
 
 impl FromStr for Level {
-    type Err = Box<dyn Error + Send + Sync>;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
@@ -49,7 +49,7 @@ impl FromStr for Level {
             "warn" | "warning" => Ok(Self::Warn),
             "error" | "err" => Ok(Self::Error),
             "fatal" => Ok(Self::Fatal),
-            _ => Err(format!("unknown log level: {}", s).into()),
+            _ => Err(anyhow::anyhow!("unknown log level: {}", s)),
         }
     }
 }

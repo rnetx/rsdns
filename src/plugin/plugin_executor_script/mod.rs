@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, process::Stdio, sync::Arc};
+use std::{collections::HashMap, process::Stdio, sync::Arc};
 
 use serde::Deserialize;
 use tokio::{
@@ -43,11 +43,9 @@ impl Script {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: serde_yaml::Value,
-    ) -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>> {
-        let options =
-            Options::deserialize(options).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize options: {}", err).into()
-            })?;
+    ) -> anyhow::Result<Box<dyn adapter::ExecutorPlugin>> {
+        let options = Options::deserialize(options)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize options: {}", err))?;
         let logger = Arc::new(logger);
         let s = Self {
             tag,
@@ -244,13 +242,13 @@ impl Script {
 
 #[async_trait::async_trait]
 impl adapter::Common for Script {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         let (canceller, canceller_guard) = common::new_canceller();
         *self.canceller.write().await = Some((canceller, canceller_guard));
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if let Some((mut canceller, canceller_guard)) = self.canceller.write().await.take() {
             drop(canceller_guard);
             canceller.cancel_and_wait().await;
@@ -269,10 +267,7 @@ impl adapter::ExecutorPlugin for Script {
         TYPE
     }
 
-    async fn prepare_workflow_args(
-        &self,
-        _: serde_yaml::Value,
-    ) -> Result<u16, Box<dyn Error + Send + Sync>> {
+    async fn prepare_workflow_args(&self, _: serde_yaml::Value) -> anyhow::Result<u16> {
         Ok(0)
     }
 
@@ -280,7 +275,7 @@ impl adapter::ExecutorPlugin for Script {
         &self,
         ctx: &mut adapter::Context,
         _: u16,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         let cmd = self.build_command(ctx);
         let canceller_guard = self.canceller.read().await.as_ref().unwrap().1.clone();
         let stdout_level = self.stdout_level;

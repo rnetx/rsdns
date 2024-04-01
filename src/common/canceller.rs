@@ -25,6 +25,10 @@ impl CancellerGuard {
     pub(crate) async fn into_cancelled_owned(self) {
         self.token.cancelled_owned().await;
     }
+
+    pub(crate) fn clone_token(&self) -> CancellationToken {
+        self.token.clone()
+    }
 }
 
 impl Deref for CancellerGuard {

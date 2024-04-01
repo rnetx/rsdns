@@ -1,15 +1,11 @@
 use std::{
-    error::Error,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
 };
 
 use crate::{adapter, log, option};
 
-pub(super) fn parse_with_default_port(
-    s: &str,
-    default_port: u16,
-) -> Result<SocketAddr, Box<dyn Error + Send + Sync>> {
+pub(super) fn parse_with_default_port(s: &str, default_port: u16) -> anyhow::Result<SocketAddr> {
     if let Ok(addr) = s.parse::<SocketAddr>() {
         return Ok(addr);
     }
@@ -29,7 +25,7 @@ pub(super) fn parse_with_default_port(
             return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
         }
     }
-    Err(format!("invalid address: {}", s).into())
+    Err(anyhow::anyhow!("invalid address: {}", s))
 }
 
 pub(crate) fn new_listener(
@@ -37,56 +33,56 @@ pub(crate) fn new_listener(
     logger: Box<dyn log::Logger>,
     tag: String,
     options: option::ListenerOptions,
-) -> Result<Box<dyn adapter::Listener>, Box<dyn Error + Send + Sync>> {
+) -> anyhow::Result<Box<dyn adapter::Listener>> {
     match options.inner {
         option::ListenerInnerOptions::UDPListener(udp_options) => {
             super::UDPListener::new(manager, logger, tag.clone(), udp_options)
                 .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                .map_err(|err| format!("create udp listener [{}] failed: {}", tag, err).into())
+                .map_err(|err| anyhow::anyhow!("create udp listener [{}] failed: {}", tag, err))
         }
         option::ListenerInnerOptions::TCPListener(tcp_options) => {
             super::TCPListener::new(manager, logger, tag.clone(), tcp_options)
                 .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                .map_err(|err| format!("create tcp listener [{}] failed: {}", tag, err).into())
+                .map_err(|err| anyhow::anyhow!("create tcp listener [{}] failed: {}", tag, err))
         }
         option::ListenerInnerOptions::BaseListener(base_options) => {
             super::BaseListener::new(manager, logger, tag.clone(), base_options)
                 .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                .map_err(|err| format!("create base listener [{}] failed: {}", tag, err).into())
+                .map_err(|err| anyhow::anyhow!("create base listener [{}] failed: {}", tag, err))
         }
 
         option::ListenerInnerOptions::TLSListener(tls_options) => {
             cfg_if::cfg_if! {
-                if #[cfg(feature = "listener-tls-support")] {
+                if #[cfg(feature = "listener-tls")] {
                     super::TLSListener::new(manager, logger, tag.clone(), tls_options)
                         .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                        .map_err(|err| format!("create tls listener [{}] failed: {}", tag, err).into())
+                        .map_err(|err| anyhow::anyhow!("create tls listener [{}] failed: {}", tag, err))
                 } else {
-                    Err("tls listener is not supported".into())
+                    Err(anyhow::anyhow!("tls listener is not supported"))
                 }
             }
         }
 
         option::ListenerInnerOptions::HTTPListener(http_options) => {
             cfg_if::cfg_if! {
-                if #[cfg(feature = "listener-http-support")] {
+                if #[cfg(feature = "listener-http")] {
                     super::HTTPListener::new(manager, logger, tag.clone(), http_options)
                         .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                        .map_err(|err| format!("create http listener [{}] failed: {}", tag, err).into())
+                        .map_err(|err| anyhow::anyhow!("create http listener [{}] failed: {}", tag, err))
                 } else {
-                    Err("http listener is not supported".into())
+                    Err(anyhow::anyhow!("http listener is not supported"))
                 }
             }
         }
 
         option::ListenerInnerOptions::QUICListener(quic_options) => {
             cfg_if::cfg_if! {
-                if #[cfg(all(feature = "listener-quic-support", feature = "listener-tls-support"))] {
+                if #[cfg(all(feature = "listener-quic", feature = "listener-tls"))] {
                     super::QUICListener::new(manager, logger, tag.clone(), quic_options)
                         .map(|l| Box::new(l) as Box<dyn adapter::Listener>)
-                        .map_err(|err| format!("create quic listener [{}] failed: {}", tag, err).into())
+                        .map_err(|err| anyhow::anyhow!("create quic listener [{}] failed: {}", tag, err))
                 } else {
-                    Err("quic listener is not supported".into())
+                    Err(anyhow::anyhow!("quic listener is not supported"))
                 }
             }
         }
@@ -97,20 +93,20 @@ lazy_static::lazy_static! {
     static ref SUPPORTED_LISTENER_TYPES: Vec<&'static str> = {
         let mut types = vec!["tcp", "udp"];
 
-        #[cfg(feature = "listener-tls-support")]
+        #[cfg(feature = "listener-tls")]
         types.push("tls");
 
         cfg_if::cfg_if! {
-            if #[cfg(all(feature = "listener-http-support", feature = "listener-https-support", feature = "listener-quic-support", feature = "listener-tls-support"))] {
+            if #[cfg(all(feature = "listener-http", feature = "listener-https", feature = "listener-quic", feature = "listener-tls"))] {
                 types.push("http(support https and http3)");
-            } else if #[cfg(all(feature = "listener-http-support", feature = "listener-https-support", feature = "listener-tls-support"))] {
+            } else if #[cfg(all(feature = "listener-http", feature = "listener-https", feature = "listener-tls"))] {
                 types.push("http(support https)");
-            } else if #[cfg(all(feature = "listener-http-support"))] {
+            } else if #[cfg(all(feature = "listener-http"))] {
                 types.push("http");
             }
         }
 
-        #[cfg(all(feature = "listener-quic-support", feature = "listener-tls-support"))]
+        #[cfg(all(feature = "listener-quic", feature = "listener-tls"))]
         types.push("quic");
 
         types

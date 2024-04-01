@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, net::IpAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, net::IpAddr, path::PathBuf, sync::Arc};
 
 use rand::Rng;
 use serde::Deserialize;
@@ -60,11 +60,9 @@ impl MaxmindDB {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: serde_yaml::Value,
-    ) -> Result<Box<dyn adapter::MatcherPlugin>, Box<dyn Error + Send + Sync>> {
-        let options =
-            Options::deserialize(options).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize options: {}", err).into()
-            })?;
+    ) -> anyhow::Result<Box<dyn adapter::MatcherPlugin>> {
+        let options = Options::deserialize(options)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize options: {}", err))?;
         let logger = Arc::new(logger);
 
         let s = Self {
@@ -131,33 +129,30 @@ impl MaxmindDB {
 
 #[async_trait::async_trait]
 impl adapter::Common for MaxmindDB {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let reader = maxminddb::Reader::open_readfile(&self.path)
-            .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!(
-                    "failed to open maxminddb file: {}, err: {}",
-                    self.path.to_string_lossy(),
-                    err
-                )
-                .into()
-            })?;
+    async fn start(&self) -> anyhow::Result<()> {
+        let reader = maxminddb::Reader::open_readfile(&self.path).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to open maxminddb file: {}, err: {}",
+                self.path.to_string_lossy(),
+                err
+            )
+        })?;
         match (reader.metadata.database_type.as_str(), &self.mode) {
             ("sing-geoip", Mode::SingBox) => {}
             ("Meta-geoip0", Mode::ClashMeta) => {}
             ("GeoLite2Country", Mode::GeoLite2Country) => {}
             _ => {
-                return Err(format!(
+                return Err(anyhow::anyhow!(
                     "unsupported maxminddb database type: {}",
                     reader.metadata.database_type
-                )
-                .into());
+                ));
             }
         }
         self.reader.write().await.replace(reader);
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -172,14 +167,9 @@ impl adapter::MatcherPlugin for MaxmindDB {
         TYPE
     }
 
-    async fn prepare_workflow_args(
-        &self,
-        args: serde_yaml::Value,
-    ) -> Result<u16, Box<dyn Error + Send + Sync>> {
-        let mut args =
-            WorkflowArgs::deserialize(args).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize args: {}", err).into()
-            })?;
+    async fn prepare_workflow_args(&self, args: serde_yaml::Value) -> anyhow::Result<u16> {
+        let mut args = WorkflowArgs::deserialize(args)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize args: {}", err))?;
         let mut new_tags = Vec::with_capacity(args.tag.len());
         for tag in args.tag.into_list().into_iter() {
             if !tag.contains(',') {
@@ -201,11 +191,7 @@ impl adapter::MatcherPlugin for MaxmindDB {
         }
     }
 
-    async fn r#match(
-        &self,
-        ctx: &mut adapter::Context,
-        args_id: u16,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    async fn r#match(&self, ctx: &mut adapter::Context, args_id: u16) -> anyhow::Result<bool> {
         let args = self.args_map.read().await.get(&args_id).cloned().unwrap();
         match args.mode {
             WorkflowMode::MatchResponseIP => {

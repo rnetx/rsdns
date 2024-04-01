@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    error::Error,
     fs, io,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -49,26 +48,27 @@ pub struct Manager {
     state_map: Arc<state::TypeMap![Send + Sync]>,
     //
     is_running: Arc<AtomicBool>,
+    started_notify_token: CancellationToken,
     is_closing: Arc<AtomicBool>,
     failed_message: Arc<Mutex<Option<String>>>,
     failed_call: CancellationToken,
 }
 
 impl Manager {
-    pub async fn prepare(options: option::Options) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub async fn prepare(options: option::Options) -> anyhow::Result<Self> {
         let root_logger = Arc::new(if options.log.disabled {
             log::NopLogger.into_box()
         } else {
             let output = match options.log.output.as_str() {
-                "" | "stdout" => Box::new(io::stdout()) as Box<dyn io::Write>,
-                "stderr" => Box::new(io::stderr()) as Box<dyn io::Write>,
+                "" | "stdout" => Box::new(io::stdout()) as Box<dyn io::Write + Send + Sync>,
+                "stderr" => Box::new(io::stderr()) as Box<dyn io::Write + Send + Sync>,
                 _ => {
                     let f = fs::OpenOptions::new()
                         .create(true)
                         .append(true)
                         .open(&options.log.output)
-                        .map_err(|err| format!("failed to open log file: {}", err))?;
-                    Box::new(f) as Box<dyn io::Write>
+                        .map_err(|err| anyhow::anyhow!("failed to open log file: {}", err))?;
+                    Box::new(f) as Box<dyn io::Write + Send + Sync>
                 }
             };
             log::BasicLogger::new(options.log.disable_timestamp, options.log.level, output)
@@ -89,6 +89,7 @@ impl Manager {
 
             state_map: Arc::new(<state::TypeMap![Send + Sync]>::new()),
             is_running: Arc::new(AtomicBool::new(false)),
+            started_notify_token: CancellationToken::new(),
             is_closing: Arc::new(AtomicBool::new(false)),
             failed_message: Arc::new(Mutex::new(None)),
             failed_call: CancellationToken::new(),
@@ -96,15 +97,21 @@ impl Manager {
         // Create Upstream
         {
             if options.upstreams.is_empty() {
-                return Err("missing upstream".into());
+                return Err(anyhow::anyhow!("missing upstream"));
             }
             let mut locker = manager.upstreams.write().await;
-            for (i, o) in options.upstreams.into_list().into_iter().enumerate() {
+            for (i, o) in options.upstreams.into_iter().enumerate() {
                 if o.tag.is_empty() {
-                    return Err(format!("create upstream[{}] failed: missing tag", i).into());
+                    return Err(anyhow::anyhow!(
+                        "create upstream[{}] failed: missing tag",
+                        i
+                    ));
                 }
                 if locker.1.contains_key(&o.tag) {
-                    return Err(format!("create upstream[{}] failed: duplicate tag", i).into());
+                    return Err(anyhow::anyhow!(
+                        "create upstream[{}] failed: duplicate tag",
+                        i
+                    ));
                 }
                 let tag = o.tag.clone();
                 let logger = log::TagLogger::new(root_logger.clone(), format!("upstream/{}", tag));
@@ -115,36 +122,41 @@ impl Manager {
                         tag.clone(),
                         o,
                     )
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("create upstream[{}](upstream[{}]) failed: {}", i, tag, err).into()
+                    .map_err(|err| {
+                        anyhow::anyhow!("create upstream[{}](upstream[{}]) failed: {}", i, tag, err)
                     })?,
                 );
                 locker.0.push(u.clone());
                 locker.1.insert(u.tag().to_string(), u);
             }
-            super::upstream_topological_sort(&mut locker.0)?;
+            super::upstream_topological_sort(&mut locker.0)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
             locker.0.shrink_to_fit();
             locker.1.shrink_to_fit();
         }
         // Create Matcher Plugin
         {
             let mut locker = manager.matcher_plugins.write().await;
-            for (i, o) in options.matcher_plugins.into_list().into_iter().enumerate() {
+            for (i, o) in options.matcher_plugins.into_iter().enumerate() {
                 if o.tag.is_empty() {
-                    return Err(format!("create matcher-plugin[{}] failed: missing tag", i).into());
+                    return Err(anyhow::anyhow!(
+                        "create matcher-plugin[{}] failed: missing tag",
+                        i
+                    ));
                 }
                 if locker.1.contains_key(&o.tag) {
-                    return Err(
-                        format!("create matcher-plugin[{}] failed: duplicate tag", i).into(),
-                    );
+                    return Err(anyhow::anyhow!(
+                        "create matcher-plugin[{}] failed: duplicate tag",
+                        i
+                    ));
                 }
                 let tag = o.tag.clone();
                 if o.r#type.is_empty() {
-                    return Err(format!(
+                    return Err(anyhow::anyhow!(
                         "create matcher-plugin[{}](matcher-plugin[{}]) failed: missing type",
-                        i, tag
-                    )
-                    .into());
+                        i,
+                        tag
+                    ));
                 }
                 let logger =
                     log::TagLogger::new(root_logger.clone(), format!("matcher-plugin/{}", tag));
@@ -156,12 +168,13 @@ impl Manager {
                         o.r#type,
                         o.options.unwrap_or(serde_yaml::Value::Null),
                     )
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!(
+                    .map_err(|err| {
+                        anyhow::anyhow!(
                             "create matcher-plugin[{}](matcher-plugin[{}]) failed: {}",
-                            i, tag, err
+                            i,
+                            tag,
+                            err
                         )
-                        .into()
                     })?,
                 );
                 locker.0.push(p.clone());
@@ -173,22 +186,26 @@ impl Manager {
         // Create Executor Plugin
         {
             let mut locker = manager.executor_plugins.write().await;
-            for (i, o) in options.executor_plugins.into_list().into_iter().enumerate() {
+            for (i, o) in options.executor_plugins.into_iter().enumerate() {
                 if o.tag.is_empty() {
-                    return Err(format!("create executor-plugin[{}] failed: missing tag", i).into());
+                    return Err(anyhow::anyhow!(
+                        "create executor-plugin[{}] failed: missing tag",
+                        i
+                    ));
                 }
                 if locker.1.contains_key(&o.tag) {
-                    return Err(
-                        format!("create executor-plugin[{}] failed: duplicate tag", i).into(),
-                    );
+                    return Err(anyhow::anyhow!(
+                        "create executor-plugin[{}] failed: duplicate tag",
+                        i
+                    ));
                 }
                 let tag = o.tag.clone();
                 if o.r#type.is_empty() {
-                    return Err(format!(
+                    return Err(anyhow::anyhow!(
                         "create executor-plugin[{}](executor-plugin[{}]) failed: missing type",
-                        i, tag
-                    )
-                    .into());
+                        i,
+                        tag
+                    ));
                 }
                 let logger =
                     log::TagLogger::new(root_logger.clone(), format!("executor-plugin/{}", tag));
@@ -200,12 +217,13 @@ impl Manager {
                         o.r#type,
                         o.options.unwrap_or(serde_yaml::Value::Null),
                     )
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!(
+                    .map_err(|err| {
+                        anyhow::anyhow!(
                             "create executor-plugin[{}](executor-plugin[{}]) failed: {}",
-                            i, tag, err
+                            i,
+                            tag,
+                            err
                         )
-                        .into()
                     })?,
                 );
                 locker.0.push(p.clone());
@@ -217,15 +235,21 @@ impl Manager {
         // Create Workflow
         {
             if options.workflows.is_empty() {
-                return Err("missing workflow".into());
+                return Err(anyhow::anyhow!("missing workflow"));
             }
             let mut locker = manager.workflows.write().await;
-            for (i, o) in options.workflows.into_list().into_iter().enumerate() {
+            for (i, o) in options.workflows.into_iter().enumerate() {
                 if o.tag.is_empty() {
-                    return Err(format!("create workflow[{}] failed: missing tag", i).into());
+                    return Err(anyhow::anyhow!(
+                        "create workflow[{}] failed: missing tag",
+                        i
+                    ));
                 }
                 if locker.1.contains_key(&o.tag) {
-                    return Err(format!("create workflow[{}] failed: duplicate tag", i).into());
+                    return Err(anyhow::anyhow!(
+                        "create workflow[{}] failed: duplicate tag",
+                        i
+                    ));
                 }
                 let tag = o.tag.clone();
                 let logger = log::TagLogger::new(root_logger.clone(), format!("workflow/{}", tag));
@@ -237,8 +261,8 @@ impl Manager {
                         o,
                     )
                     .map(|w| Box::new(w) as Box<dyn adapter::Workflow>)
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("create workflow[{}](workflow[{}]) failed: {}", i, tag, err).into()
+                    .map_err(|err| {
+                        anyhow::anyhow!("create workflow[{}](workflow[{}]) failed: {}", i, tag, err)
                     })?,
                 );
                 locker.0.push(w.clone());
@@ -250,12 +274,15 @@ impl Manager {
         // Create Listener
         {
             if options.listeners.is_empty() {
-                return Err("missing listener".into());
+                return Err(anyhow::anyhow!("missing listener"));
             }
             let mut l = manager.listeners.write().await;
-            for (i, o) in options.listeners.into_list().into_iter().enumerate() {
+            for (i, o) in options.listeners.into_iter().enumerate() {
                 if o.tag.is_empty() {
-                    return Err(format!("create listener[{}] failed: missing tag", i).into());
+                    return Err(anyhow::anyhow!(
+                        "create listener[{}] failed: missing tag",
+                        i
+                    ));
                 }
                 let tag = o.tag.clone();
                 let logger = log::TagLogger::new(root_logger.clone(), format!("listener/{}", tag));
@@ -266,8 +293,8 @@ impl Manager {
                         tag.clone(),
                         o,
                     )
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("create listener[{}](listener[{}]) failed: {}", i, tag, err).into()
+                    .map_err(|err| {
+                        anyhow::anyhow!("create listener[{}](listener[{}]) failed: {}", i, tag, err)
                     })?,
                 );
                 l.push(li);
@@ -297,7 +324,7 @@ impl Manager {
         Arc::new(Box::new(self.clone()) as Box<dyn adapter::Manager>)
     }
 
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         #[cfg(feature = "api")]
         {
             // Prepare Upstream
@@ -500,12 +527,9 @@ impl Manager {
         }
     }
 
-    pub async fn run(
-        &self,
-        cancel_token: CancellationToken,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn run(&self, cancel_token: CancellationToken) -> anyhow::Result<()> {
         if self.is_running.swap(true, Ordering::Relaxed) {
-            return Err("manager is already running".into());
+            return Err(anyhow::anyhow!("manager is already running"));
         }
         info!(self.manager_logger, "starting...");
         if let Err(e) = self.start().await {
@@ -516,6 +540,7 @@ impl Manager {
         // Wait
         info!(self.manager_logger, "started");
         let mut failed_msg = None;
+        self.started_notify_token.cancel();
         tokio::select! {
             _ = self.failed_call.cancelled() => {
                 failed_msg = self.failed_message.lock().await.clone();
@@ -529,11 +554,15 @@ impl Manager {
         self.close().await;
         info!(self.manager_logger, "closed");
         let res = match failed_msg {
-            Some(msg) => Err(msg.into()),
+            Some(msg) => Err(anyhow::anyhow!("{}", msg)),
             None => Ok(()),
         };
         self.is_closing.store(false, Ordering::Relaxed);
         res
+    }
+
+    pub fn started_notify_token(&self) -> CancellationToken {
+        self.started_notify_token.clone()
     }
 }
 

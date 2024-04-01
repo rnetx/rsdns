@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc};
+use std::sync::Arc;
 
 use crate::{adapter, option};
 
@@ -44,17 +44,16 @@ impl MatchPlugin {
     pub(super) async fn prepare(
         &mut self,
         manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<()> {
         let tag = self.plugin_tag.take().unwrap();
         let plugin = manager
             .get_matcher_plugin(&tag)
             .await
-            .ok_or(format!("matcher-plugin [{}] not found", tag))?;
+            .ok_or(anyhow::anyhow!("matcher-plugin [{}] not found", tag))?;
         let args = self.args.take().unwrap_or(serde_yaml::Value::default());
-        let args_id = plugin
-            .prepare_workflow_args(args)
-            .await
-            .map_err(|err| format!("matcher-plugin [{}] check args failed: {}", tag, err))?;
+        let args_id = plugin.prepare_workflow_args(args).await.map_err(|err| {
+            anyhow::anyhow!("matcher-plugin [{}] check args failed: {}", tag, err)
+        })?;
         self.plugin.replace(plugin);
         self.args_id.replace(args_id);
         Ok(())
@@ -71,17 +70,16 @@ impl ExecPlugin {
     pub(super) async fn prepare(
         &mut self,
         manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<()> {
         let tag = self.plugin_tag.take().unwrap();
         let plugin = manager
             .get_executor_plugin(&tag)
             .await
-            .ok_or(format!("executor-plugin [{}] not found", tag))?;
+            .ok_or(anyhow::anyhow!("executor-plugin [{}] not found", tag))?;
         let args = self.args.take().unwrap_or(serde_yaml::Value::default());
-        let args_id = plugin
-            .prepare_workflow_args(args)
-            .await
-            .map_err(|err| format!("executor-plugin [{}] check args failed: {}", tag, err))?;
+        let args_id = plugin.prepare_workflow_args(args).await.map_err(|err| {
+            anyhow::anyhow!("executor-plugin [{}] check args failed: {}", tag, err)
+        })?;
         self.plugin.replace(plugin);
         self.args_id.replace(args_id);
         Ok(())

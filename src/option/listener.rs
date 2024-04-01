@@ -2,8 +2,6 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::common;
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListenerOptions {
     pub tag: String,
@@ -86,6 +84,9 @@ pub struct HTTPListenerOptions {
 #[derive(Debug, Clone, Deserialize)]
 pub struct QUICListenerOptions {
     pub listen: String,
+    #[serde(default)]
+    #[serde(rename = "disable-prefix")]
+    pub disable_prefix: bool,
     #[serde(flatten)]
     #[serde(default)]
     pub tls: ListenerTLSOptions,
@@ -96,11 +97,13 @@ pub struct QUICListenerOptions {
 
 // TLS
 
+#[serde_with::serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListenerTLSOptions {
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(rename = "client-ca-file")]
     #[serde(default)]
-    pub client_ca_file: common::SingleOrList<String>,
+    pub client_ca_file: Vec<String>,
     #[serde(rename = "server-cert-file")]
     pub server_cert_file: String,
     #[serde(rename = "server-key-file")]

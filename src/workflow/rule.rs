@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc};
+use std::sync::Arc;
 
 use crate::{adapter, debug, error, log, option};
 
@@ -9,9 +9,7 @@ pub(super) enum WorkflowRule {
 }
 
 impl WorkflowRule {
-    pub(super) fn new(
-        options: option::WorkflowRuleOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub(super) fn new(options: option::WorkflowRuleOptions) -> anyhow::Result<Self> {
         match options {
             option::WorkflowRuleOptions::MatchAnd(options) => {
                 let rule = MatchRule::new_and(options)?;
@@ -31,7 +29,7 @@ impl WorkflowRule {
     pub(super) async fn check(
         &self,
         manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<()> {
         match self {
             Self::MatchAnd(rule) => rule.check(manager).await,
             Self::MatchOr(rule) => rule.check(manager).await,
@@ -43,7 +41,7 @@ impl WorkflowRule {
         &self,
         logger: &Arc<Box<dyn log::Logger>>,
         ctx: &mut adapter::Context,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         match self {
             Self::MatchAnd(rule) => rule.run(logger, ctx).await,
             Self::MatchOr(rule) => rule.run(logger, ctx).await,
@@ -65,24 +63,20 @@ pub(super) struct MatchRule {
 }
 
 impl MatchRule {
-    pub(super) fn new_and(
-        options: option::MatchAndRuleOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub(super) fn new_and(options: option::MatchAndRuleOptions) -> anyhow::Result<Self> {
         let mut matchers = Vec::with_capacity(options.match_and.len());
-        for (i, options) in options.match_and.into_list().into_iter().enumerate() {
-            let rule = super::MatchItemRule::new(options)
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("create match-and-rule: match-and[{}] failed: {}", i, err).into()
-                })?;
+        for (i, options) in options.match_and.into_iter().enumerate() {
+            let rule = super::MatchItemRule::new(options).map_err(|err| {
+                anyhow::anyhow!("create match-and-rule: match-and[{}] failed: {}", i, err)
+            })?;
             matchers.push(rule);
         }
         let execs = if options.exec.len() > 0 {
             let mut execs = Vec::with_capacity(options.exec.len());
-            for (i, options) in options.exec.into_list().into_iter().enumerate() {
-                let rule = super::ExecItemRule::new(options)
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("create match-and-rule: exec[{}] failed: {}", i, err).into()
-                    })?;
+            for (i, options) in options.exec.into_iter().enumerate() {
+                let rule = super::ExecItemRule::new(options).map_err(|err| {
+                    anyhow::anyhow!("create match-and-rule: exec[{}] failed: {}", i, err)
+                })?;
                 execs.push(rule);
             }
             Some(execs)
@@ -91,11 +85,10 @@ impl MatchRule {
         };
         let else_exec = if options.else_exec.len() > 0 {
             let mut else_execs = Vec::with_capacity(options.else_exec.len());
-            for (i, options) in options.else_exec.into_list().into_iter().enumerate() {
-                let rule = super::ExecItemRule::new(options)
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("create match-and-rule: else-exec[{}] failed: {}", i, err).into()
-                    })?;
+            for (i, options) in options.else_exec.into_iter().enumerate() {
+                let rule = super::ExecItemRule::new(options).map_err(|err| {
+                    anyhow::anyhow!("create match-and-rule: else-exec[{}] failed: {}", i, err)
+                })?;
                 else_execs.push(rule);
             }
             Some(else_execs)
@@ -110,24 +103,20 @@ impl MatchRule {
         })
     }
 
-    pub(super) fn new_or(
-        options: option::MatchOrRuleOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub(super) fn new_or(options: option::MatchOrRuleOptions) -> anyhow::Result<Self> {
         let mut matchers = Vec::with_capacity(options.match_or.len());
-        for (i, options) in options.match_or.into_list().into_iter().enumerate() {
-            let rule = super::MatchItemRule::new(options)
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("create match-or-rule: match-or[{}] failed: {}", i, err).into()
-                })?;
+        for (i, options) in options.match_or.into_iter().enumerate() {
+            let rule = super::MatchItemRule::new(options).map_err(|err| {
+                anyhow::anyhow!("create match-or-rule: match-or[{}] failed: {}", i, err)
+            })?;
             matchers.push(rule);
         }
         let execs = if options.exec.len() > 0 {
             let mut execs = Vec::with_capacity(options.exec.len());
-            for (i, options) in options.exec.into_list().into_iter().enumerate() {
-                let rule = super::ExecItemRule::new(options)
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("create match-or-rule: exec[{}] failed: {}", i, err).into()
-                    })?;
+            for (i, options) in options.exec.into_iter().enumerate() {
+                let rule = super::ExecItemRule::new(options).map_err(|err| {
+                    anyhow::anyhow!("create match-or-rule: exec[{}] failed: {}", i, err)
+                })?;
                 execs.push(rule);
             }
             Some(execs)
@@ -136,11 +125,10 @@ impl MatchRule {
         };
         let else_exec = if options.else_exec.len() > 0 {
             let mut else_execs = Vec::with_capacity(options.else_exec.len());
-            for (i, options) in options.else_exec.into_list().into_iter().enumerate() {
-                let rule = super::ExecItemRule::new(options)
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("create match-or-rule: else-exec[{}] failed: {}", i, err).into()
-                    })?;
+            for (i, options) in options.else_exec.into_iter().enumerate() {
+                let rule = super::ExecItemRule::new(options).map_err(|err| {
+                    anyhow::anyhow!("create match-or-rule: else-exec[{}] failed: {}", i, err)
+                })?;
                 else_execs.push(rule);
             }
             Some(else_execs)
@@ -159,33 +147,39 @@ impl MatchRule {
         &self,
         label: &str,
         manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<()> {
         for (i, rule) in self.matchers.iter().enumerate() {
             if let Err(e) = rule.check(manager).await {
-                return Err(format!(
+                return Err(anyhow::anyhow!(
                     "check match-{}-rule: match-{}[{}] failed: {}",
-                    label, label, i, e
-                )
-                .into());
+                    label,
+                    label,
+                    i,
+                    e
+                ));
             }
         }
         if let Some(execs) = &self.exec {
             for (i, rule) in execs.iter().enumerate() {
                 if let Err(e) = rule.check(manager).await {
-                    return Err(
-                        format!("check match-{}-rule: exec[{}] failed: {}", label, i, e).into(),
-                    );
+                    return Err(anyhow::anyhow!(
+                        "check match-{}-rule: exec[{}] failed: {}",
+                        label,
+                        i,
+                        e
+                    ));
                 }
             }
         }
         if let Some(else_execs) = &self.else_exec {
             for (i, rule) in else_execs.iter().enumerate() {
                 if let Err(e) = rule.check(manager).await {
-                    return Err(format!(
+                    return Err(anyhow::anyhow!(
                         "check match-{}-rule: else-exec[{}] failed: {}",
-                        label, i, e
-                    )
-                    .into());
+                        label,
+                        i,
+                        e
+                    ));
                 }
             }
         }
@@ -195,7 +189,7 @@ impl MatchRule {
     pub(super) async fn check(
         &self,
         manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<()> {
         match self.logical {
             Logical::And => self.check_wrapper("and", manager).await,
             Logical::Or => self.check_wrapper("or", manager).await,
@@ -207,7 +201,7 @@ impl MatchRule {
         label: &str,
         logger: &Arc<Box<dyn log::Logger>>,
         ctx: &mut adapter::Context,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         let mut matched_num = 0;
         for (i, rule) in self.matchers.iter().enumerate() {
             debug!(
@@ -379,7 +373,7 @@ impl MatchRule {
         &self,
         logger: &Arc<Box<dyn log::Logger>>,
         ctx: &mut adapter::Context,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         match self.logical {
             Logical::And => self.run_wrapper("and", logger, ctx).await,
             Logical::Or => self.run_wrapper("or", logger, ctx).await,
@@ -392,15 +386,11 @@ pub(super) struct ExecRule {
 }
 
 impl ExecRule {
-    pub(super) fn new(
-        options: option::ExecRuleOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub(super) fn new(options: option::ExecRuleOptions) -> anyhow::Result<Self> {
         let mut execs = Vec::with_capacity(options.exec.len());
-        for (i, options) in options.exec.into_list().into_iter().enumerate() {
+        for (i, options) in options.exec.into_iter().enumerate() {
             let rule = super::ExecItemRule::new(options)
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("create exec-rule: exec[{}] failed: {}", i, err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("create exec-rule: exec[{}] failed: {}", i, err))?;
             execs.push(rule);
         }
         Ok(Self { exec: execs })
@@ -409,10 +399,14 @@ impl ExecRule {
     pub(super) async fn check(
         &self,
         manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<()> {
         for (i, rule) in self.exec.iter().enumerate() {
             if let Err(e) = rule.check(manager).await {
-                return Err(format!("check exec-rule: exec[{}] failed: {}", i, e).into());
+                return Err(anyhow::anyhow!(
+                    "check exec-rule: exec[{}] failed: {}",
+                    i,
+                    e
+                ));
             }
         }
         Ok(())
@@ -422,7 +416,7 @@ impl ExecRule {
         &self,
         logger: &Arc<Box<dyn log::Logger>>,
         ctx: &mut adapter::Context,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         for (i, rule) in self.exec.iter().enumerate() {
             debug!(
                 logger,

@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     future::Future,
     io,
     net::{IpAddr, SocketAddr},
@@ -18,7 +17,7 @@ use crate::{adapter, option};
 enum DialerWrapper {
     Basic(super::BasicDialer),
 
-    #[cfg(feature = "upstream-dialer-socks5-support")]
+    #[cfg(feature = "upstream-dialer-socks5")]
     Socks5(super::Socks5Dialer),
 }
 
@@ -31,11 +30,11 @@ impl Dialer {
     pub(crate) fn new(
         manager: Arc<Box<dyn adapter::Manager>>,
         options: option::DialerOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         let basic_dialer = super::BasicDialer::new(manager, options.basic);
 
         cfg_if::cfg_if! {
-            if #[cfg(feature = "upstream-dialer-socks5-support")] {
+            if #[cfg(feature = "upstream-dialer-socks5")] {
                 if let Some(socks5_options) = options.socks5 {
                     let socks5_dialer = super::Socks5Dialer::new(basic_dialer, socks5_options)?;
                     Ok(Self {
@@ -78,13 +77,13 @@ impl Dialer {
         match &self.dialer {
             DialerWrapper::Basic(basic_dialer) => {
                 let remote_addr = remote_addr.try_to_socket_addr().ok_or(io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                    io::ErrorKind::AddrNotAvailable,
                     "domain address is unsupported in basic dialer",
                 ))?;
                 basic_dialer.new_tcp_stream(remote_addr).await
             }
 
-            #[cfg(feature = "upstream-dialer-socks5-support")]
+            #[cfg(feature = "upstream-dialer-socks5")]
             DialerWrapper::Socks5(socks5_dialer) => socks5_dialer.new_tcp_stream(remote_addr).await,
         }
     }
@@ -96,7 +95,7 @@ impl Dialer {
         match &self.dialer {
             DialerWrapper::Basic(basic_dialer) => {
                 let addr = addr.try_to_socket_addr_ref().ok_or(io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                    io::ErrorKind::AddrNotAvailable,
                     "domain address is unsupported in basic dialer",
                 ))?;
                 let udp_socket = basic_dialer.new_udp_socket(addr).await?;
@@ -106,7 +105,7 @@ impl Dialer {
                 ))
             }
 
-            #[cfg(feature = "upstream-dialer-socks5-support")]
+            #[cfg(feature = "upstream-dialer-socks5")]
             DialerWrapper::Socks5(socks5_dialer) => {
                 let (udp_socket, remote_addr) = socks5_dialer.new_udp_socket(addr).await?;
                 Ok((GenericUdpSocket::Socks5(udp_socket), remote_addr))
@@ -114,7 +113,7 @@ impl Dialer {
         }
     }
 
-    #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+    #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
     async fn new_quic_connection_wrapper(
         &self,
         remote_addr: super::SocksAddr,
@@ -124,7 +123,7 @@ impl Dialer {
         match &self.dialer {
             DialerWrapper::Basic(basic_dialer) => {
                 let remote_addr = remote_addr.try_to_socket_addr().ok_or(io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                    io::ErrorKind::AddrNotAvailable,
                     "domain address is unsupported in basic dialer",
                 ))?;
                 basic_dialer
@@ -132,7 +131,7 @@ impl Dialer {
                     .await
             }
 
-            #[cfg(feature = "upstream-dialer-socks5-support")]
+            #[cfg(feature = "upstream-dialer-socks5")]
             DialerWrapper::Socks5(socks5_dialer) => {
                 socks5_dialer
                     .new_quic_connection(remote_addr, quic_client_config, server_name)
@@ -145,7 +144,7 @@ impl Dialer {
         match &self.dialer {
             DialerWrapper::Basic(basic_dialer) => basic_dialer.start().await,
 
-            #[cfg(feature = "upstream-dialer-socks5-support")]
+            #[cfg(feature = "upstream-dialer-socks5")]
             DialerWrapper::Socks5(socks5_dialer) => socks5_dialer.start().await,
         }
     }
@@ -154,7 +153,7 @@ impl Dialer {
         match &self.dialer {
             DialerWrapper::Basic(basic_dialer) => basic_dialer.close().await,
 
-            #[cfg(feature = "upstream-dialer-socks5-support")]
+            #[cfg(feature = "upstream-dialer-socks5")]
             DialerWrapper::Socks5(socks5_dialer) => socks5_dialer.close().await,
         }
     }
@@ -163,7 +162,7 @@ impl Dialer {
         match &self.dialer {
             DialerWrapper::Basic(_) => false,
 
-            #[cfg(feature = "upstream-dialer-socks5-support")]
+            #[cfg(feature = "upstream-dialer-socks5")]
             DialerWrapper::Socks5(_) => true,
         }
     }
@@ -184,7 +183,7 @@ impl Dialer {
             .await
     }
 
-    #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+    #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
     pub(crate) async fn new_quic_connection(
         &self,
         remote_addr: super::SocksAddr,
@@ -223,7 +222,10 @@ impl Dialer {
         }
         join_set.abort_all();
         Err(err.unwrap_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "create new tcp stream failed")
+            io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                "create new tcp stream failed",
+            )
         }))
     }
 
@@ -237,7 +239,7 @@ impl Dialer {
         self.new_udp_socket(&addr).await
     }
 
-    #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+    #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
     pub(crate) async fn parallel_new_quic_connection(
         &self,
         remote_ip_addr: Vec<IpAddr>,
@@ -340,7 +342,7 @@ impl AsyncRead for GenericTcpStream {
 pub(crate) enum GenericUdpSocket {
     Basic(UdpSocket),
 
-    #[cfg(feature = "upstream-dialer-socks5-support")]
+    #[cfg(feature = "upstream-dialer-socks5")]
     Socks5(super::Socks5UdpSocket),
 }
 
@@ -355,7 +357,7 @@ impl GenericUdpSocket {
                 Ok((n, super::SocksAddr::SocketAddr(addr)))
             }
 
-            #[cfg(feature = "upstream-dialer-socks5-support")]
+            #[cfg(feature = "upstream-dialer-socks5")]
             Self::Socks5(socks5_udp_socket) => socks5_udp_socket.recv_buf_from(buf).await,
         }
     }
@@ -370,7 +372,7 @@ impl GenericUdpSocket {
                 udp_socket.send_to(buf, target).await
             }
 
-            #[cfg(feature = "upstream-dialer-socks5-support")]
+            #[cfg(feature = "upstream-dialer-socks5")]
             Self::Socks5(socks5_udp_socket) => socks5_udp_socket.send_to(buf, target).await,
         }
     }

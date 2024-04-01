@@ -1,10 +1,11 @@
-use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use hickory_proto::op::Message;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{mpsc, Mutex},
+    task::JoinSet,
 };
 
 use crate::{adapter, common, error, fatal, info, log, option};
@@ -28,14 +29,11 @@ impl TLSListener {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: option::TLSListenerOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let listen = super::parse_with_default_port(&options.listen, 853).map_err::<Box<
-            dyn Error + Send + Sync,
-        >, _>(|err| {
-            format!("invalid listen: {}", err).into()
-        })?;
+    ) -> anyhow::Result<Self> {
+        let listen = super::parse_with_default_port(&options.listen, 853)
+            .map_err(|err| anyhow::anyhow!("invalid listen: {}", err))?;
         if options.generic.workflow.is_empty() {
-            return Err("missing workflow".into());
+            return Err(anyhow::anyhow!("missing workflow"));
         }
         let tls_config = super::new_tls_config(options.tls)?;
         Ok(Self {
@@ -60,7 +58,7 @@ impl TLSListener {
         tls_acceptor: Arc<tokio_rustls::TlsAcceptor>,
         canceller_guard: common::CancellerGuard,
     ) {
-        let (mut conn_canceller, conn_canceller_guard) = common::new_canceller();
+        let mut join_set = JoinSet::new();
         loop {
             tokio::select! {
               res = tcp_listener.accept() => {
@@ -70,9 +68,9 @@ impl TLSListener {
                     let workflow = workflow.clone();
                     let logger = logger.clone();
                     let listener_tag = listener_tag.clone();
-                    let conn_canceller_guard = conn_canceller_guard.clone();
+                    let canceller_guard = canceller_guard.clone();
                     let tls_acceptor = tls_acceptor.clone();
-                    tokio::spawn(async move {
+                    join_set.spawn(async move {
                       let stream = tokio::select! {
                         res = tls_acceptor.accept(stream) => {
                           match res {
@@ -82,10 +80,11 @@ impl TLSListener {
                             }
                           }
                         },
-                        _ = conn_canceller_guard.cancelled() => return,
+                        _ = canceller_guard.cancelled() => return,
                       };
-                      Self::stream_handle(workflow, logger, query_timeout, listener_tag, stream, peer_addr, conn_canceller_guard).await
+                      Self::stream_handle(workflow, logger, query_timeout, listener_tag, stream, peer_addr, canceller_guard).await
                     });
+                    while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
                   }
                   Err(e) => {
                     if !canceller_guard.is_cancelled() {
@@ -101,8 +100,7 @@ impl TLSListener {
               }
             }
         }
-        drop(conn_canceller_guard);
-        conn_canceller.cancel_and_wait().await;
+        join_set.shutdown().await;
     }
 
     async fn stream_handle(
@@ -114,8 +112,8 @@ impl TLSListener {
         peer_addr: SocketAddr,
         canceller_guard: common::CancellerGuard,
     ) {
+        let mut join_set = JoinSet::new();
         let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(64);
-        let (mut stream_canceller, stream_canceller_guard) = common::new_canceller();
         loop {
             tokio::select! {
               res = stream.read_u16() => {
@@ -150,10 +148,10 @@ impl TLSListener {
                 }
                 let workflow = workflow.clone();
                 let logger = logger.clone();
-                let stream_canceller_guard = stream_canceller_guard.clone();
+                let canceller_guard = canceller_guard.clone();
                 let sender = sender.clone();
                 let listener_tag = listener_tag.clone();
-                tokio::spawn(async move {
+                join_set.spawn(async move {
                   let fut = async move {
                     if let Ok(request) = Message::from_vec(&buf) {
                       if let Some(response) = super::handle(workflow, logger, listener_tag, query_timeout, peer_addr.ip(), request).await {
@@ -165,9 +163,10 @@ impl TLSListener {
                   };
                   tokio::select! {
                     _ = fut => {}
-                    _ = stream_canceller_guard.cancelled() => {}
+                    _ = canceller_guard.cancelled() => {}
                   }
                 });
+                while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
               }
               res = receiver.recv() => {
                 if let Some(buf) = res {
@@ -208,19 +207,21 @@ impl TLSListener {
               }
             }
         }
-        drop(stream_canceller_guard);
-        stream_canceller.cancel_and_wait().await;
+        join_set.shutdown().await;
     }
 }
 
 #[async_trait::async_trait]
 impl adapter::Common for TLSListener {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let workflow = self
-            .manager
-            .get_workflow(&self.workflow_tag)
-            .await
-            .ok_or(format!("workflow [{}] not found", self.workflow_tag))?;
+    async fn start(&self) -> anyhow::Result<()> {
+        let workflow =
+            self.manager
+                .get_workflow(&self.workflow_tag)
+                .await
+                .ok_or(anyhow::anyhow!(
+                    "workflow [{}] not found",
+                    self.workflow_tag
+                ))?;
         let tcp_listener = TcpListener::bind(&self.listen).await?;
         info!(self.logger, "TLS listener listen on {}", self.listen,);
         let tls_acceptor = Arc::new(tokio_rustls::TlsAcceptor::from(__self.tls_config.clone()));
@@ -246,7 +247,7 @@ impl adapter::Common for TLSListener {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if let Some(mut canceller) = self.canceller.lock().await.take() {
             canceller.cancel_and_wait().await;
         }

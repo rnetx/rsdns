@@ -1,4 +1,4 @@
-use std::{fs, io, sync::Arc, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
 use hickory_proto::{
     op::{Message, Query},
@@ -7,7 +7,7 @@ use hickory_proto::{
 use rand::Rng;
 use tokio::task::JoinSet;
 
-use crate::{adapter, log, option};
+use crate::{adapter, log, option, upstream};
 
 struct NopManager {
     state_map: Arc<state::TypeMap![Send + Sync]>,
@@ -124,18 +124,106 @@ async fn test_message(upstream: &Arc<Box<dyn adapter::Upstream>>) {
     }
 }
 
-#[tokio::test]
-async fn test_upstream() {
+async fn test_upstream(options: option::UpstreamOptions) {
     let manager = Box::new(NopManager::default());
     let basic_logger =
         log::BasicLogger::new(false, log::Level::Debug, Box::new(io::stdout())).into_box();
-    let f = fs::File::open("/rsdns/test.yaml").unwrap();
-    let options: option::UpstreamOptions = serde_yaml::from_reader(f).unwrap();
     let tag = options.tag.clone();
-    let u = super::new_upstream(Arc::new(manager), basic_logger, tag, options)
+    let u = upstream::new_upstream(Arc::new(manager), basic_logger, tag, options)
         .map(|u| Arc::new(u))
         .unwrap();
     u.start().await.unwrap();
     test_message(&u).await;
     u.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_udp_upstream() {
+    test_upstream(option::UpstreamOptions {
+        tag: "udp".to_string(),
+        query_timeout: None,
+        inner: option::UpstreamInnerOptions::UDPUpstream(option::UDPUpstreamOptions {
+            address: "223.5.5.5".to_string(),
+            idle_timeout: None,
+            fallback_tcp: false,
+            enable_pipeline: false,
+            bootstrap: None,
+            dialer: None,
+        }),
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn test_tcp_upstream() {
+    test_upstream(option::UpstreamOptions {
+        tag: "tcp".to_string(),
+        query_timeout: None,
+        inner: option::UpstreamInnerOptions::TCPUpstream(option::TCPUpstreamOptions {
+            address: "223.5.5.5".to_string(),
+            idle_timeout: None,
+            enable_pipeline: true,
+            bootstrap: None,
+            dialer: None,
+        }),
+    })
+    .await;
+}
+
+#[cfg(feature = "upstream-tls")]
+#[tokio::test]
+async fn test_tls_upstream() {
+    test_upstream(option::UpstreamOptions {
+        tag: "tls".to_string(),
+        query_timeout: None,
+        inner: option::UpstreamInnerOptions::TLSUpstream(option::TLSUpstreamOptions {
+            address: "223.5.5.5".to_string(),
+            idle_timeout: None,
+            enable_pipeline: true,
+            tls: Default::default(),
+            bootstrap: None,
+            dialer: None,
+        }),
+    })
+    .await;
+}
+
+#[cfg(feature = "upstream-https")]
+#[tokio::test]
+async fn test_https_upstream() {
+    test_upstream(option::UpstreamOptions {
+        tag: "https".to_string(),
+        query_timeout: None,
+        inner: option::UpstreamInnerOptions::HTTPSUpstream(option::HTTPSUpstreamOptions {
+            address: "223.5.5.5".to_string(),
+            idle_timeout: None,
+            path: None,
+            header: None,
+            host: None,
+            use_http3: false,
+            use_post: false,
+            tls: Default::default(),
+            bootstrap: None,
+            dialer: None,
+        }),
+    })
+    .await;
+}
+
+#[cfg(feature = "upstream-quic")]
+#[tokio::test]
+async fn test_quic_upstream() {
+    test_upstream(option::UpstreamOptions {
+        tag: "https".to_string(),
+        query_timeout: None,
+        inner: option::UpstreamInnerOptions::QUICUpstream(option::QUICUpstreamOptions {
+            address: "223.5.5.5".to_string(),
+            idle_timeout: None,
+            disable_add_prefix: false,
+            tls: Default::default(),
+            bootstrap: None,
+            dialer: None,
+        }),
+    })
+    .await;
 }

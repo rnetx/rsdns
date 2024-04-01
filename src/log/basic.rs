@@ -6,14 +6,14 @@ use std::{
 pub(crate) struct BasicLogger {
     disable_timestamp: bool,
     level: super::Level,
-    output: Arc<Mutex<Box<dyn Write>>>,
+    output: Arc<Mutex<Box<dyn Write + Send + Sync>>>,
 }
 
 impl BasicLogger {
     pub(crate) fn new(
         disable_timestamp: bool,
         level: super::Level,
-        output: Box<dyn Write>,
+        output: Box<dyn Write + Send + Sync>,
     ) -> Self {
         Self {
             disable_timestamp,
@@ -26,9 +26,6 @@ impl BasicLogger {
         Box::new(self)
     }
 }
-
-unsafe impl Send for BasicLogger {}
-unsafe impl Sync for BasicLogger {}
 
 impl super::Logger for BasicLogger {
     fn enabled(&self, level: super::Level) -> bool {

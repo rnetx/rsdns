@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc};
+use std::sync::Arc;
 
 use crate::{adapter, debug, log, option};
 
@@ -15,15 +15,14 @@ impl Workflow {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: option::WorkflowOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         if options.rules.is_empty() {
-            return Err("missing rule".into());
+            return Err(anyhow::anyhow!("missing rule"));
         }
         let mut l = Vec::with_capacity(options.rules.len());
-        for (i, rule) in options.rules.into_list().into_iter().enumerate() {
-            let r = super::WorkflowRule::new(rule).map_err::<Box<dyn Error + Send + Sync>, _>(
-                |err| format!("create rule[{}] failed: {}", i, err).into(),
-            )?;
+        for (i, rule) in options.rules.into_iter().enumerate() {
+            let r = super::WorkflowRule::new(rule)
+                .map_err(|err| anyhow::anyhow!("create rule[{}] failed: {}", i, err))?;
             l.push(r);
         }
         Ok(Self {
@@ -41,19 +40,16 @@ impl adapter::Workflow for Workflow {
         &self.tag
     }
 
-    async fn check(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn check(&self) -> anyhow::Result<()> {
         for (i, rule) in self.rules.iter().enumerate() {
             if let Err(e) = rule.check(&self.manager).await {
-                return Err(format!("check rule[{}] failed: {}", i, e).into());
+                return Err(anyhow::anyhow!("check rule[{}] failed: {}", i, e));
             }
         }
         Ok(())
     }
 
-    async fn execute(
-        &self,
-        ctx: &mut adapter::Context,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    async fn execute(&self, ctx: &mut adapter::Context) -> anyhow::Result<adapter::ReturnMode> {
         for (i, rule) in self.rules.iter().enumerate() {
             debug!(
                 self.logger,
@@ -81,7 +77,7 @@ impl adapter::Workflow for Workflow {
                     );
                     return Ok(adapter::ReturnMode::ReturnAll);
                 }
-                Err(e) => return Err(format!("run rule[{}] failed: {}", i, e).into()),
+                Err(e) => return Err(anyhow::anyhow!("run rule[{}] failed: {}", i, e)),
             }
         }
         Ok(adapter::ReturnMode::Continue)

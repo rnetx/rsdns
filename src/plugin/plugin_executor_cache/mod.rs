@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use rand::Rng;
 use serde::Deserialize;
@@ -10,7 +10,7 @@ pub(crate) const TYPE: &str = "cache";
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "plugin-executor-cache-redis")] {
-        #[derive( Deserialize)]
+        #[derive(Deserialize)]
         #[serde(tag = "mode")]
         enum Options {
             #[serde(rename = "memory")]
@@ -20,7 +20,7 @@ cfg_if::cfg_if! {
             Redis(redis_cache::Options),
         }
     } else {
-        #[derive( Deserialize)]
+        #[derive(Deserialize)]
         #[serde(tag = "mode")]
         enum Options {
             #[serde(rename = "memory")]
@@ -62,11 +62,9 @@ impl Cache {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: serde_yaml::Value,
-    ) -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>> {
-        let options =
-            Options::deserialize(options).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize options: {}", err).into()
-            })?;
+    ) -> anyhow::Result<Box<dyn adapter::ExecutorPlugin>> {
+        let options = Options::deserialize(options)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize options: {}", err))?;
         let logger = Arc::new(logger);
 
         let s = match options {
@@ -91,7 +89,7 @@ impl Cache {
 
 #[async_trait::async_trait]
 impl adapter::Common for Cache {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         match &self.cache {
             CacheWrapper::Memory(s) => {
                 s.start().await?;
@@ -106,7 +104,7 @@ impl adapter::Common for Cache {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         match &self.cache {
             CacheWrapper::Memory(s) => {
                 s.close().await;
@@ -130,14 +128,9 @@ impl adapter::ExecutorPlugin for Cache {
         TYPE
     }
 
-    async fn prepare_workflow_args(
-        &self,
-        args: serde_yaml::Value,
-    ) -> Result<u16, Box<dyn Error + Send + Sync>> {
-        let args =
-            WorkflowArgs::deserialize(args).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize args: {}", err).into()
-            })?;
+    async fn prepare_workflow_args(&self, args: serde_yaml::Value) -> anyhow::Result<u16> {
+        let args = WorkflowArgs::deserialize(args)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize args: {}", err))?;
         let mut args_map = self.args_map.write().await;
         let mut rng = rand::thread_rng();
         loop {
@@ -153,7 +146,7 @@ impl adapter::ExecutorPlugin for Cache {
         &self,
         ctx: &mut adapter::Context,
         args_id: u16,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         let args = self.args_map.read().await.get(&args_id).cloned().unwrap();
 
         match args {
@@ -335,7 +328,7 @@ mod util {
 }
 
 mod memory_cache {
-    use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
+    use std::{collections::HashMap, sync::Arc, time::Duration};
 
     use chrono::{DateTime, Local};
     use hickory_proto::op::{Message, Query};
@@ -396,7 +389,7 @@ mod memory_cache {
         async fn write_cache_map(
             cache_map: &HashMap<Query, (Message, DateTime<Local>)>,
             dump_file: &mut File,
-        ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        ) -> anyhow::Result<()> {
             let mut data_map = HashMap::with_capacity(cache_map.len());
             for (query, (msg, _)) in cache_map {
                 if let Ok(data) = msg.to_vec() {
@@ -415,8 +408,7 @@ mod memory_cache {
 
         async fn read_cache_map(
             dump_file: &mut File,
-        ) -> Result<HashMap<Query, (Message, DateTime<Local>)>, Box<dyn Error + Send + Sync>>
-        {
+        ) -> anyhow::Result<HashMap<Query, (Message, DateTime<Local>)>> {
             let mut buf = vec![];
             let mut buf_writer = io::BufWriter::new(&mut buf);
             io::copy(dump_file, &mut buf_writer).await?;
@@ -533,7 +525,7 @@ mod memory_cache {
             }
         }
 
-        pub(super) async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        pub(super) async fn start(&self) -> anyhow::Result<()> {
             let (canceller, canceller_guard) = common::new_canceller();
             if let Some(dump_file) = &self.dump_file {
                 let mut dump_file = fs::OpenOptions::new()
@@ -541,9 +533,7 @@ mod memory_cache {
                     .create(true)
                     .open(dump_file)
                     .await
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("failed to open dump file: {}", err).into()
-                    })?;
+                    .map_err(|err| anyhow::anyhow!("failed to open dump file: {}", err))?;
                 if let Ok(cache_map) = Self::read_cache_map(&mut dump_file).await {
                     *self.cache_map.write().await = cache_map;
                 }
@@ -656,7 +646,6 @@ mod memory_cache {
 #[cfg(feature = "plugin-executor-cache-redis")]
 mod redis_cache {
     use std::{
-        error::Error,
         net::{IpAddr, SocketAddr},
         sync::Arc,
         time::Duration,
@@ -690,7 +679,7 @@ mod redis_cache {
         pub(super) fn new(
             logger: Arc<Box<dyn log::Logger>>,
             options: Options,
-        ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        ) -> anyhow::Result<Self> {
             let mut u = String::default();
             {
                 let addr = if let Ok(addr) = options.server.parse::<SocketAddr>() {
@@ -710,10 +699,10 @@ mod redis_cache {
                             u.push('@');
                         }
                         (Some(_), None) => {
-                            return Err("missing password".into());
+                            return Err(anyhow::anyhow!("missing password"));
                         }
                         (None, Some(_)) => {
-                            return Err("missing username".into());
+                            return Err(anyhow::anyhow!("missing username"));
                         }
                         (None, None) => {}
                     }
@@ -748,10 +737,10 @@ mod redis_cache {
                             u.push_str(&password);
                         }
                         (Some(_), None) => {
-                            return Err("missing password".into());
+                            return Err(anyhow::anyhow!("missing password"));
                         }
                         (None, Some(_)) => {
-                            return Err("missing username".into());
+                            return Err(anyhow::anyhow!("missing username"));
                         }
                         (None, None) => {}
                     }
@@ -766,13 +755,11 @@ mod redis_cache {
             })
         }
 
-        pub(super) async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        pub(super) async fn start(&self) -> anyhow::Result<()> {
             let client = self.client.clone();
             let connection_manager = redis::aio::ConnectionManager::new(client)
                 .await
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("failed to create connection manager: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("failed to create connection manager: {}", err))?;
             self.connection_manager
                 .write()
                 .await
@@ -783,25 +770,26 @@ mod redis_cache {
         pub(super) async fn restore_response(
             &self,
             query: &Query,
-        ) -> Result<Option<Message>, Box<dyn Error + Send + Sync>> {
+        ) -> anyhow::Result<Option<Message>> {
             let key = super::util::get_key(query);
             let mut connection_manager = self.connection_manager.read().await.clone().unwrap();
             let value = connection_manager
                 .get::<'_, _, Option<String>>(key)
                 .await
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("failed to get response from redis: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("failed to get response from redis: {}", err))?;
             match value {
                 Some(value) => {
                     let buf =
                         base64::Engine::decode(&base64::prelude::BASE64_STANDARD_NO_PAD, value)
-                            .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                            format!("failed to deserialize response from redis: {}", err).into()
-                        })?;
-                    let msg = Message::from_vec(&buf).map_err::<Box<dyn Error + Send + Sync>, _>(
-                        |err| format!("failed to parse response from redis: {}", err).into(),
-                    )?;
+                            .map_err(|err| {
+                                anyhow::anyhow!(
+                                    "failed to deserialize response from redis: {}",
+                                    err
+                                )
+                            })?;
+                    let msg = Message::from_vec(&buf).map_err(|err| {
+                        anyhow::anyhow!("failed to parse response from redis: {}", err)
+                    })?;
                     Ok(Some(msg))
                 }
                 None => Ok(None),
@@ -813,21 +801,17 @@ mod redis_cache {
             query: Query,
             response: Message,
             expired_duration: Duration,
-        ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        ) -> anyhow::Result<()> {
             let key = super::util::get_key(&query);
             let data = response
                 .to_vec()
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("failed to serialize response to redis: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("failed to serialize response to redis: {}", err))?;
             let value = base64::Engine::encode(&base64::prelude::BASE64_STANDARD_NO_PAD, data);
             let mut connection_manager = self.connection_manager.read().await.clone().unwrap();
             connection_manager
                 .set_ex(key, value, expired_duration.as_secs())
                 .await
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("failed to set response to redis: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("failed to set response to redis: {}", err))?;
             Ok(())
         }
     }

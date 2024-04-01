@@ -1,14 +1,10 @@
-use std::{
-    error::Error,
-    net::{SocketAddr, UdpSocket},
-    sync::Arc,
-    time::Duration,
-};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use hickory_proto::op::Message;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::Mutex,
+    task::JoinSet,
 };
 
 use crate::{adapter, common, fatal, info, log, option};
@@ -23,6 +19,7 @@ pub(crate) struct QUICListener {
     workflow_tag: String,
     query_timeout: Option<Duration>,
     tls_config: Arc<tokio_rustls::rustls::ServerConfig>,
+    disable_prefix: bool,
     canceller: Mutex<Option<common::Canceller>>,
 }
 
@@ -32,14 +29,11 @@ impl QUICListener {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: option::QUICListenerOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let listen = super::parse_with_default_port(&options.listen, 853).map_err::<Box<
-            dyn Error + Send + Sync,
-        >, _>(|err| {
-            format!("invalid listen: {}", err).into()
-        })?;
+    ) -> anyhow::Result<Self> {
+        let listen = super::parse_with_default_port(&options.listen, 853)
+            .map_err(|err| anyhow::anyhow!("invalid listen: {}", err))?;
         if options.generic.workflow.is_empty() {
-            return Err("missing workflow".into());
+            return Err(anyhow::anyhow!("missing workflow"));
         }
         let mut tls_config = super::new_tls_config(options.tls)?;
         tls_config.alpn_protocols = vec![b"doq".into()];
@@ -49,6 +43,7 @@ impl QUICListener {
             tag,
             listen,
             workflow_tag: options.generic.workflow,
+            disable_prefix: options.disable_prefix,
             query_timeout: options.generic.query_timeout,
             tls_config: Arc::new(tls_config),
             canceller: Mutex::new(None),
@@ -61,10 +56,11 @@ impl QUICListener {
         logger: Arc<Box<dyn log::Logger>>,
         query_timeout: Option<Duration>,
         listener_tag: String,
+        disable_prefix: bool,
         endpoint: quinn::Endpoint,
         canceller_guard: common::CancellerGuard,
     ) {
-        let (mut endpoint_canceller, endpoint_canceller_guard) = common::new_canceller();
+        let mut join_set = JoinSet::new();
         loop {
             tokio::select! {
               res = endpoint.accept() => {
@@ -72,9 +68,9 @@ impl QUICListener {
                     Some(c) => {
                         let workflow = workflow.clone();
                         let logger = logger.clone();
-                        let endpoint_canceller_guard = endpoint_canceller_guard.clone();
+                        let canceller_guard = canceller_guard.clone();
                         let listener_tag = listener_tag.clone();
-                        tokio::spawn(async move {
+                        join_set.spawn(async move {
                           let conn = tokio::select! {
                             res = c => {
                                 match res {
@@ -84,12 +80,13 @@ impl QUICListener {
                                     }
                                 }
                             }
-                            _ = endpoint_canceller_guard.cancelled() => {
+                            _ = canceller_guard.cancelled() => {
                                 return;
                             }
                           };
-                          Self::conn_handle(workflow, logger, query_timeout, listener_tag, conn, endpoint_canceller_guard).await;
+                          Self::conn_handle(workflow, logger, query_timeout, listener_tag, disable_prefix, conn, canceller_guard).await;
                         });
+                        while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
                     }
                     None => {
                         if !canceller_guard.is_cancelled() {
@@ -105,8 +102,7 @@ impl QUICListener {
               }
             }
         }
-        drop(endpoint_canceller_guard);
-        endpoint_canceller.cancel_and_wait().await;
+        join_set.shutdown().await;
         endpoint.close(0u32.into(), b"");
     }
 
@@ -115,22 +111,24 @@ impl QUICListener {
         logger: Arc<Box<dyn log::Logger>>,
         query_timeout: Option<Duration>,
         listener_tag: String,
+        disable_prefix: bool,
         conn: quinn::Connection,
         canceller_guard: common::CancellerGuard,
     ) {
-        let (mut conn_canceller, conn_canceller_guard) = common::new_canceller();
+        let mut join_set = JoinSet::new();
         loop {
             tokio::select! {
               res = conn.accept_bi() => {
                 if let Ok((send_stream, recv_stream)) = res {
                   let workflow = workflow.clone();
                   let logger = logger.clone();
-                  let conn_canceller_guard = conn_canceller_guard.clone();
+                  let canceller_guard = canceller_guard.clone();
                   let peer_addr = conn.remote_address();
                   let listener_tag = listener_tag.clone();
-                  tokio::spawn(async move {
-                    Self::stream_handle(workflow, logger, query_timeout, listener_tag, send_stream, recv_stream, peer_addr, conn_canceller_guard).await;
+                  join_set.spawn(async move {
+                    Self::stream_handle(workflow, logger, query_timeout, listener_tag, disable_prefix, send_stream, recv_stream, peer_addr, canceller_guard).await;
                   });
+                  while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
                 }
               }
               _ = canceller_guard.cancelled() => {
@@ -138,8 +136,7 @@ impl QUICListener {
               }
             }
         }
-        drop(conn_canceller_guard);
-        conn_canceller.cancel_and_wait().await;
+        join_set.shutdown().await;
         conn.close(0u32.into(), b"");
     }
 
@@ -148,58 +145,86 @@ impl QUICListener {
         logger: Arc<Box<dyn log::Logger>>,
         query_timeout: Option<Duration>,
         listener_tag: String,
+        disable_prefix: bool,
         mut send_stream: quinn::SendStream,
         mut recv_stream: quinn::RecvStream,
         peer_addr: SocketAddr,
         canceller_guard: common::CancellerGuard,
     ) {
-        let length = tokio::select! {
-            res = recv_stream.read_u16() => {
-                match res {
-                    Ok(v) => {
-                        if v == 0 {
+        let request = if !disable_prefix {
+            let length = tokio::select! {
+                res = recv_stream.read_u16() => {
+                    match res {
+                        Ok(v) => {
+                            if v == 0 {
+                                return;
+                            }
+                            v
+                        }
+                        Err(_) => {
                             return;
                         }
-                        v
                     }
-                    Err(_) => {
+                }
+                _ = canceller_guard.cancelled() => {
+                    return;
+                }
+            };
+            let mut buf = vec![0; length as usize];
+            tokio::select! {
+                res = recv_stream.read_exact(&mut buf) => {
+                    if let Err(_) = res {
                         return;
                     }
                 }
-            }
-            _ = canceller_guard.cancelled() => {
-                return;
-            }
-        };
-        let mut buf = vec![0; length as usize];
-        tokio::select! {
-            res = recv_stream.read_exact(&mut buf) => {
-                if let Err(_) = res {
+                _ = canceller_guard.cancelled() => {
                     return;
                 }
             }
-            _ = canceller_guard.cancelled() => {
-                return;
+            recv_stream.stop(0u32.into()).ok();
+            match Message::from_vec(&buf).ok() {
+                Some(v) => v,
+                None => return,
             }
-        }
-        let fut = async move {
-            if let Ok(request) = Message::from_vec(&buf) {
-                if let Some(response) = super::handle(
-                    workflow,
-                    logger,
-                    listener_tag,
-                    query_timeout,
-                    peer_addr.ip(),
-                    request,
-                )
-                .await
-                {
-                    if let Ok(buf) = response.to_vec() {
-                        let data_length_bytes = (buf.len() as u16).to_be_bytes();
-                        let mut chain = bytes::Buf::chain(&data_length_bytes[..], buf.as_slice());
-                        if let Ok(_) = send_stream.write_all_buf(&mut chain).await {
-                            send_stream.finish().await.ok();
+        } else {
+            let mut buf = Vec::with_capacity(65535);
+            tokio::select! {
+                res = recv_stream.read_buf(&mut buf) => {
+                    match res {
+                        Ok(size) => {
+                            buf.truncate(size);
                         }
+                        Err(_) => {
+                            return;
+                        }
+                    }
+                }
+                _ = canceller_guard.cancelled() => {
+                    return;
+                }
+            }
+            recv_stream.stop(0u32.into()).ok();
+            match Message::from_vec(&buf).ok() {
+                Some(v) => v,
+                None => return,
+            }
+        };
+        let fut = async move {
+            if let Some(response) = super::handle(
+                workflow,
+                logger,
+                listener_tag,
+                query_timeout,
+                peer_addr.ip(),
+                request,
+            )
+            .await
+            {
+                if let Ok(buf) = response.to_vec() {
+                    let data_length_bytes = (buf.len() as u16).to_be_bytes();
+                    let mut chain = bytes::Buf::chain(&data_length_bytes[..], buf.as_slice());
+                    if let Ok(_) = send_stream.write_all_buf(&mut chain).await {
+                        send_stream.finish().await.ok();
                     }
                 }
             }
@@ -213,19 +238,18 @@ impl QUICListener {
 
 #[async_trait::async_trait]
 impl adapter::Common for QUICListener {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let workflow = self
-            .manager
-            .get_workflow(&self.workflow_tag)
-            .await
-            .ok_or(format!("workflow [{}] not found", self.workflow_tag))?;
-        let udp_socket = UdpSocket::bind(&self.listen)?;
-        let quic_server_config = quinn_proto::ServerConfig::with_crypto(self.tls_config.clone());
-        let quic_endpoint = quinn::Endpoint::new(
-            quinn::EndpointConfig::default(),
-            Some(quic_server_config),
-            udp_socket,
-            Arc::new(quinn::TokioRuntime),
+    async fn start(&self) -> anyhow::Result<()> {
+        let workflow =
+            self.manager
+                .get_workflow(&self.workflow_tag)
+                .await
+                .ok_or(anyhow::anyhow!(
+                    "workflow [{}] not found",
+                    self.workflow_tag
+                ))?;
+        let quic_endpoint = quinn::Endpoint::server(
+            quinn_proto::ServerConfig::with_crypto(self.tls_config.clone()),
+            self.listen.clone(),
         )?;
         info!(self.logger, "QUIC endpoint listen on {}", self.listen,);
         let (canceller, canceller_guard) = common::new_canceller();
@@ -233,6 +257,7 @@ impl adapter::Common for QUICListener {
         let listener_tag = self.tag.clone();
         let logger = self.logger.clone();
         let query_timeout = self.query_timeout;
+        let disable_prefix = self.disable_prefix;
         tokio::spawn(async move {
             Self::handle(
                 manager,
@@ -240,6 +265,7 @@ impl adapter::Common for QUICListener {
                 logger,
                 query_timeout,
                 listener_tag,
+                disable_prefix,
                 quic_endpoint,
                 canceller_guard,
             )
@@ -249,7 +275,7 @@ impl adapter::Common for QUICListener {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if let Some(mut canceller) = self.canceller.lock().await.take() {
             canceller.cancel_and_wait().await;
         }

@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    error::Error,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
     time::Duration,
@@ -43,7 +42,7 @@ impl DHCPUpstream {
         logger: Arc<Box<dyn log::Logger>>,
         tag: String,
         options: option::DHCPUpstreamOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             manager,
             logger,
@@ -58,20 +57,18 @@ impl DHCPUpstream {
         })
     }
 
-    async fn find_dns_servers(&self) -> Result<Vec<IpAddr>, Box<dyn Error + Send + Sync>> {
+    async fn find_dns_servers(&self) -> anyhow::Result<Vec<IpAddr>> {
         let interface = self
             .manager
             .get_state_map()
             .try_get::<network::InterfaceFinder>()
-            .ok_or::<Box<dyn Error + Send + Sync>>("interface finder not found".into())?
+            .ok_or(anyhow::anyhow!("interface finder not found"))?
             .find_interface(&self.interface)
             .await
-            .ok_or::<Box<dyn Error + Send + Sync>>(
-                format!("interface [{}] not found", self.interface).into(),
-            )?;
+            .ok_or(anyhow::anyhow!("interface [{}] not found", self.interface))?;
         tokio::select! {
           _ = tokio::time::sleep(Duration::from_secs(10)) => {
-            Err("find dns servers timeout".into())
+            Err(anyhow::anyhow!("find dns servers timeout"))
           }
           res = Self::find_dns_server_v4_by_interface(&self.manager, &interface) => {
             match res {
@@ -80,7 +77,7 @@ impl DHCPUpstream {
                 ips.sort();
                 Ok(ips)
               },
-              Err(e) => Err(format!("find dns server failed: {}", e).into())
+              Err(e) => Err(anyhow::anyhow!("find dns server failed: {}", e))
             }
           }
         }
@@ -89,11 +86,11 @@ impl DHCPUpstream {
     async fn find_dns_server_v4_by_interface(
         manager: &Box<dyn adapter::Manager>,
         interface: &network_interface::NetworkInterface,
-    ) -> Result<Vec<Ipv4Addr>, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Vec<Ipv4Addr>> {
         let mac_addr = if let Some(mac_addr) = &interface.mac_addr {
             mac_addr
         } else {
-            return Err("mac address not found".into());
+            return Err(anyhow::anyhow!("mac address not found"));
         };
 
         cfg_if::cfg_if! {
@@ -114,18 +111,16 @@ impl DHCPUpstream {
         {
             network::set_interface(&udp_socket, finder, &interface.name, false).await?;
         } else {
-            return Err("interface finder not found".into());
+            return Err(anyhow::anyhow!("interface finder not found"));
         }
         udp_socket.set_broadcast(true)?;
         // DHCP
         let mac_addr_slice = mac_addr
             .split(':')
             .map(|x| {
-                u8::from_str_radix(x, 10).map_err::<Box<dyn Error + Send + Sync>, _>(|_| {
-                    format!("malformed mac address").into()
-                })
+                u8::from_str_radix(x, 10).map_err(|_| anyhow::anyhow!("malformed mac address"))
             })
-            .collect::<Result<Vec<u8>, Box<dyn Error + Send + Sync>>>()?;
+            .collect::<anyhow::Result<Vec<u8>>>()?;
         let mut msg = dhcproto::v4::Message::default();
         msg.set_flags(dhcproto::v4::Flags::default().set_broadcast())
             .set_chaddr(&mac_addr_slice)
@@ -162,13 +157,15 @@ impl DHCPUpstream {
                                                 return Ok(dns.clone());
                                             }
                                             _ => {
-                                                return Err("malformed response dhcp message".into())
+                                                return Err(anyhow::anyhow!(
+                                                    "malformed response dhcp message"
+                                                ))
                                             }
                                         }
                                     }
                                 }
                             }
-                            _ => return Err("malformed response dhcp message".into()),
+                            _ => return Err(anyhow::anyhow!("malformed response dhcp message")),
                         }
                     }
                 }
@@ -270,7 +267,7 @@ impl DHCPUpstream {
 
 #[async_trait::async_trait]
 impl adapter::Common for DHCPUpstream {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         let ips = self.find_dns_servers().await?;
         info!(
             self.logger,
@@ -286,7 +283,7 @@ impl adapter::Common for DHCPUpstream {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if let Some(mut canceller) = self.canceller.lock().await.take() {
             canceller.cancel_and_wait().await;
         }
@@ -320,7 +317,7 @@ impl adapter::Upstream for DHCPUpstream {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &mut Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Message> {
         let upstream_map = self.upstream_map.read().await;
         if let Some(u) = upstream_map.values().next() {
             return u.exchange(log_tracker, request).await;
@@ -330,7 +327,7 @@ impl adapter::Upstream for DHCPUpstream {
                 { option_tracker = log_tracker },
                 "no available upstream"
             );
-            return Err("no available upstream".into());
+            return Err(anyhow::anyhow!("no available upstream"));
         }
     }
 }

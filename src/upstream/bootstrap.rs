@@ -1,4 +1,4 @@
-use std::{error::Error, io, net::IpAddr, sync::Arc, time::Duration};
+use std::{io, net::IpAddr, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Local};
 use futures_util::Future;
@@ -33,12 +33,15 @@ impl Bootstrap {
         }
     }
 
-    pub(super) async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let upstream = self
-            .manager
-            .get_upstream(&self.upstream_tag)
-            .await
-            .ok_or(format!("upstream [{}] not found", &self.upstream_tag))?;
+    pub(super) async fn start(&self) -> anyhow::Result<()> {
+        let upstream =
+            self.manager
+                .get_upstream(&self.upstream_tag)
+                .await
+                .ok_or(anyhow::anyhow!(
+                    "upstream [{}] not found",
+                    &self.upstream_tag
+                ))?;
         self.upstream.write().await.replace(upstream);
         Ok(())
     }
@@ -47,10 +50,7 @@ impl Bootstrap {
         &self.upstream_tag
     }
 
-    fn create_message(
-        domain: &str,
-        is_aaaa: bool,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    fn create_message(domain: &str, is_aaaa: bool) -> anyhow::Result<Message> {
         let name: Name = domain.parse()?;
         let mut query = Query::new();
         query.set_name(name);
@@ -72,7 +72,7 @@ impl Bootstrap {
     async fn exchange_wrapper(
         upstream: Arc<Box<dyn adapter::Upstream>>,
         mut request: Message,
-    ) -> Result<(Vec<IpAddr>, Duration), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<(Vec<IpAddr>, Duration)> {
         let mut response = upstream.exchange(None, &mut request).await?;
         let mut ips = Vec::with_capacity(response.answer_count() as usize);
         let mut min_ttl = 0u32;
@@ -97,15 +97,12 @@ impl Bootstrap {
             }
         }
         if ips.len() == 0 {
-            return Err("no ip found".into());
+            return Err(anyhow::anyhow!("no ip found"));
         }
         Ok((ips, Duration::from_secs(min_ttl as u64)))
     }
 
-    async fn lookup_wrapper(
-        &self,
-        domain: &str,
-    ) -> Result<(Vec<IpAddr>, Duration), Box<dyn Error + Send + Sync>> {
+    async fn lookup_wrapper(&self, domain: &str) -> anyhow::Result<(Vec<IpAddr>, Duration)> {
         let upstream = self.upstream.read().await.as_ref().unwrap().clone();
         match &self.strategy {
             option::BootstrapStrategy::OnlyIPv4 => {
@@ -163,12 +160,12 @@ impl Bootstrap {
                     }
                 }
                 Ok(Err(e)) => match &err {
-                    Some(e2) => err = Some(format!("{} | {}", e2, e).into()),
+                    Some(e2) => err = Some(anyhow::anyhow!("{} | {}", e2, e)),
                     None => err = Some(e),
                 },
                 Err(e) => match &err {
-                    Some(e2) => err = Some(format!("{} | {}", e2, e).into()),
-                    None => err = Some(format!("{}", e).into()),
+                    Some(e2) => err = Some(anyhow::anyhow!("{} | {}", e2, e)),
+                    None => err = Some(anyhow::anyhow!("{}", e)),
                 },
             }
         }
@@ -179,10 +176,7 @@ impl Bootstrap {
         Err(err.unwrap())
     }
 
-    pub(super) async fn lookup(
-        &self,
-        domain: &str,
-    ) -> Result<Vec<IpAddr>, Box<dyn Error + Send + Sync>> {
+    pub(super) async fn lookup(&self, domain: &str) -> anyhow::Result<Vec<IpAddr>> {
         let now = Local::now();
         {
             let cache = self.cache.read().await;

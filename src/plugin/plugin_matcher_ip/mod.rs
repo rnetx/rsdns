@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, net::IpAddr, str::FromStr, sync::Arc};
+use std::{collections::HashMap, net::IpAddr, str::FromStr, sync::Arc};
 
 use rand::Rng;
 use serde::Deserialize;
@@ -8,7 +8,7 @@ use tokio::{
     sync::RwLock,
 };
 
-use crate::{adapter, common, debug, log};
+use crate::{adapter, common, debug, error, log};
 
 pub(crate) const TYPE: &str = "ip";
 
@@ -55,14 +55,12 @@ impl IP {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: serde_yaml::Value,
-    ) -> Result<Box<dyn adapter::MatcherPlugin>, Box<dyn Error + Send + Sync>> {
-        let options =
-            Options::deserialize(options).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize options: {}", err).into()
-            })?;
+    ) -> anyhow::Result<Box<dyn adapter::MatcherPlugin>> {
+        let options = Options::deserialize(options)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize options: {}", err))?;
         let logger = Arc::new(logger);
         if options.rule.len() == 0 && options.file.len() == 0 {
-            return Err("missing rule or file".into());
+            return Err(anyhow::anyhow!("missing rule or file"));
         }
         let inner_rule_reader = if options.rule.len() > 0 {
             let mut ip_map = HashMap::with_capacity(options.rule.len());
@@ -72,7 +70,11 @@ impl IP {
                         ip_map.insert(v, ());
                     }
                     Err(e) => {
-                        return Err(format!("failed to parse ip rule: {}, err: {}", ip, e).into());
+                        return Err(anyhow::anyhow!(
+                            "failed to parse ip rule: {}, err: {}",
+                            ip,
+                            e
+                        ));
                     }
                 }
             }
@@ -102,15 +104,17 @@ impl IP {
     async fn load_files<S: AsRef<str>>(
         logger: &Arc<Box<dyn log::Logger>>,
         files: &[S],
-    ) -> Result<maxminddb::Reader<Vec<u8>>, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<maxminddb::Reader<Vec<u8>>> {
         let mut ip_map = HashMap::new();
         for file in files {
             let mut lines = match fs::File::open(file.as_ref()).await {
                 Ok(f) => io::BufReader::new(f).lines(),
                 Err(e) => {
-                    return Err(
-                        format!("failed to open file: {}, err: {}", file.as_ref(), e).into(),
-                    );
+                    return Err(anyhow::anyhow!(
+                        "failed to open file: {}, err: {}",
+                        file.as_ref(),
+                        e
+                    ));
                 }
             };
             while let Ok(Some(line)) = lines.next_line().await {
@@ -122,7 +126,7 @@ impl IP {
                 let rule = match common::IPRange::from_str(s) {
                     Ok(v) => v,
                     Err(e) => {
-                        debug!(
+                        error!(
                             logger,
                             "failed to parse ip rule: {}, file: {}, err: {}",
                             s,
@@ -184,7 +188,7 @@ impl IP {
 
 #[async_trait::async_trait]
 impl adapter::Common for IP {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         if let Some(files) = self.files.as_ref() {
             let rules = Self::load_files(&self.logger, files).await?;
             self.file_rule_reader.write().await.replace(rules);
@@ -192,7 +196,7 @@ impl adapter::Common for IP {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -207,10 +211,7 @@ impl adapter::MatcherPlugin for IP {
         TYPE
     }
 
-    async fn prepare_workflow_args(
-        &self,
-        mut args: serde_yaml::Value,
-    ) -> Result<u16, Box<dyn Error + Send + Sync>> {
+    async fn prepare_workflow_args(&self, mut args: serde_yaml::Value) -> anyhow::Result<u16> {
         if args.as_mapping().map(|m| m.len() == 0).unwrap_or(false) {
             args = serde_yaml::Value::Null;
         }
@@ -218,14 +219,11 @@ impl adapter::MatcherPlugin for IP {
             WorkflowArgs::default()
         } else if args.is_string() {
             WorkflowMode::deserialize(args)
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("failed to deserialize args: {}", err).into()
-                })
+                .map_err(|err| anyhow::anyhow!("failed to deserialize args: {}", err))
                 .map(|mode| WorkflowArgs { mode })?
         } else {
-            WorkflowArgs::deserialize(args).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize args: {}", err).into()
-            })?
+            WorkflowArgs::deserialize(args)
+                .map_err(|err| anyhow::anyhow!("failed to deserialize args: {}", err))?
         };
         let mut args_map = self.args_map.write().await;
         let mut rng = rand::thread_rng();
@@ -238,11 +236,7 @@ impl adapter::MatcherPlugin for IP {
         }
     }
 
-    async fn r#match(
-        &self,
-        ctx: &mut adapter::Context,
-        args_id: u16,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    async fn r#match(&self, ctx: &mut adapter::Context, args_id: u16) -> anyhow::Result<bool> {
         let args = self.args_map.read().await.get(&args_id).cloned().unwrap();
         match args.mode {
             WorkflowMode::MatchResponseIP => {

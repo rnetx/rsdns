@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use hickory_proto::rr::{Name, RecordType};
 use tokio::sync::RwLock;
@@ -11,9 +11,7 @@ pub(super) struct MatchItemRule {
 }
 
 impl MatchItemRule {
-    pub(super) fn new(
-        options: option::MatchItemRuleOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub(super) fn new(options: option::MatchItemRuleOptions) -> anyhow::Result<Self> {
         Ok(Self {
             invert: options.invert,
             inner: MatchItemInnerRule::new(options.options)?,
@@ -23,7 +21,7 @@ impl MatchItemRule {
     pub(super) async fn check(
         &self,
         manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<()> {
         self.inner.check(manager).await
     }
 
@@ -31,7 +29,7 @@ impl MatchItemRule {
         &self,
         logger: &Arc<Box<dyn log::Logger>>,
         ctx: &mut adapter::Context,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<bool> {
         let res = self.inner.r#match(logger, ctx).await?;
         if self.invert {
             debug!(
@@ -62,9 +60,7 @@ enum MatchItemInnerRule {
 }
 
 impl MatchItemInnerRule {
-    fn new(
-        options: option::MatchItemWrapperRuleOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    fn new(options: option::MatchItemWrapperRuleOptions) -> anyhow::Result<Self> {
         match options {
             option::MatchItemWrapperRuleOptions::Listener(list) => {
                 let mut map = HashMap::with_capacity(list.len());
@@ -82,7 +78,7 @@ impl MatchItemInnerRule {
                     let item_str = item.trim();
                     if !item_str.is_empty() {
                         let range = common::IPRange::from_str(item_str)
-                            .map_err(|_| format!("invalid client-ip: {}", item_str))?;
+                            .map_err(|_| anyhow::anyhow!("invalid client-ip: {}", item_str))?;
                         l.push(range);
                     }
                 }
@@ -95,22 +91,24 @@ impl MatchItemInnerRule {
                         serde_yaml::Value::Number(n) => {
                             if let Some(n) = n.as_u64() {
                                 if n > u16::MAX as u64 {
-                                    return Err(format!("invalid qtype: {}", n).into());
+                                    return Err(anyhow::anyhow!("invalid qtype: {}", n));
                                 }
                                 map.insert(RecordType::from(n as u16), ());
                             }
-                            return Err(format!("invalid qtype: {}", n).into());
+                            return Err(anyhow::anyhow!("invalid qtype: {}", n));
                         }
                         serde_yaml::Value::String(s) => {
                             let item_str = s.trim();
                             if !item_str.is_empty() {
                                 let r =
                                     RecordType::from_str(item_str.to_ascii_uppercase().as_str())
-                                        .map_err(|_| format!("invalid qtype: {}", item_str))?;
+                                        .map_err(|_| {
+                                            anyhow::anyhow!("invalid qtype: {}", item_str)
+                                        })?;
                                 map.insert(r, ());
                             }
                         }
-                        _ => return Err(format!("invalid qtype: {:?}", item).into()),
+                        _ => return Err(anyhow::anyhow!("invalid qtype: {:?}", item)),
                     }
                 }
                 Ok(Self::QType(map))
@@ -121,7 +119,7 @@ impl MatchItemInnerRule {
                     let item_str = item.trim();
                     if !item_str.is_empty() {
                         let name = Name::from_str(item_str)
-                            .map_err(|_| format!("invalid qname: {}", item_str))?;
+                            .map_err(|_| anyhow::anyhow!("invalid qname: {}", item_str))?;
                         map.insert(name, ());
                     }
                 }
@@ -134,7 +132,7 @@ impl MatchItemInnerRule {
                     let item_str = item.trim();
                     if !item_str.is_empty() {
                         let range = common::IPRange::from_str(item_str)
-                            .map_err(|_| format!("invalid resp-ip: {}", item_str))?;
+                            .map_err(|_| anyhow::anyhow!("invalid resp-ip: {}", item_str))?;
                         l.push(range);
                     }
                 }
@@ -155,10 +153,7 @@ impl MatchItemInnerRule {
         }
     }
 
-    async fn check(
-        &self,
-        manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn check(&self, manager: &Arc<Box<dyn adapter::Manager>>) -> anyhow::Result<()> {
         match self {
             MatchItemInnerRule::Plugin(v) => {
                 let mut p = v.write().await;
@@ -173,7 +168,7 @@ impl MatchItemInnerRule {
         &self,
         logger: &Arc<Box<dyn log::Logger>>,
         ctx: &mut adapter::Context,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<bool> {
         match self {
             MatchItemInnerRule::Listener(map) => {
                 let res = map.contains_key(ctx.listener());
@@ -214,7 +209,10 @@ impl MatchItemInnerRule {
                 Ok(res)
             }
             MatchItemInnerRule::QType(map) => {
-                let query = ctx.request().query().ok_or("no query found")?;
+                let query = ctx
+                    .request()
+                    .query()
+                    .ok_or(anyhow::anyhow!("no query found"))?;
                 let qtype = query.query_type();
                 let res = map.contains_key(&qtype);
                 if res {
@@ -235,7 +233,10 @@ impl MatchItemInnerRule {
                 Ok(res)
             }
             MatchItemInnerRule::QName(map) => {
-                let query = ctx.request().query().ok_or("no query found")?;
+                let query = ctx
+                    .request()
+                    .query()
+                    .ok_or(anyhow::anyhow!("no query found"))?;
                 let qname = query.name();
                 let res = map.contains_key(&qname);
                 if res {

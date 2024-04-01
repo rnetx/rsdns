@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     io,
     net::SocketAddr,
     ops::{Deref, DerefMut},
@@ -20,7 +19,7 @@ pub(super) struct Socks5Dialer {
     address: SocketAddr,
     user_pass: Option<(String, String)>,
 
-    #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+    #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
     quic_endpoint_config: quinn::EndpointConfig,
 }
 
@@ -28,11 +27,11 @@ impl Socks5Dialer {
     pub(super) fn new(
         basic_dialer: super::BasicDialer,
         options: option::Socks5DialerOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         let user_pass = match (options.username, options.password) {
             (Some(username), Some(password)) => Some((username, password)),
-            (Some(_), None) => return Err("socks5: missing password".into()),
-            (None, Some(_)) => return Err("socks5: missing username".into()),
+            (Some(_), None) => return Err(anyhow::anyhow!("socks5: missing password")),
+            (None, Some(_)) => return Err(anyhow::anyhow!("socks5: missing username")),
             _ => None,
         };
         Ok(Self {
@@ -40,7 +39,7 @@ impl Socks5Dialer {
             address: options.address,
             user_pass,
 
-            #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+            #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
             quic_endpoint_config: {
                 let mut config = quinn::EndpointConfig::default();
                 config.max_udp_payload_size(1500 - 20 - 8 - 261).ok();
@@ -176,7 +175,7 @@ impl Socks5Dialer {
         .map_err(|err| io::Error::new(io::ErrorKind::ConnectionRefused, format!("socks5: {}", err)))
     }
 
-    #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+    #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
     pub(super) async fn new_quic_connection(
         &self,
         remote_addr: super::SocksAddr,
@@ -199,7 +198,7 @@ impl Socks5Dialer {
         )
         .map_err(|err| {
             io::Error::new(
-                io::ErrorKind::Other,
+                io::ErrorKind::ConnectionRefused,
                 format!("failed to create QUIC endpoint: {}", err),
             )
         })?;
@@ -207,13 +206,13 @@ impl Socks5Dialer {
             .connect_with(quic_client_config, maybe_fake_socket_addr, server_name)
             .map_err(|err| {
                 io::Error::new(
-                    io::ErrorKind::Other,
+                    io::ErrorKind::ConnectionRefused,
                     format!("failed to connect to QUIC server: {}", err),
                 )
             })?;
         let quic_connection = quic_connecting.await.map_err(|err| {
             io::Error::new(
-                io::ErrorKind::Other,
+                io::ErrorKind::ConnectionRefused,
                 format!("failed to establish QUIC connection: {}", err),
             )
         })?;
@@ -276,7 +275,7 @@ impl Socks5UdpSocket {
     }
 }
 
-#[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+#[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
 mod quic {
     use std::{
         fmt,

@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use hickory_proto::op::Message;
 
@@ -24,7 +24,7 @@ pub(crate) fn new_upstream(
     logger: Box<dyn log::Logger>,
     tag: String,
     options: option::UpstreamOptions,
-) -> Result<Box<dyn adapter::Upstream>, Box<dyn Error + Send + Sync>> {
+) -> anyhow::Result<Box<dyn adapter::Upstream>> {
     let logger = Arc::new(logger);
     match options.inner {
         option::UpstreamInnerOptions::UDPUpstream(udp_options) => {
@@ -33,7 +33,7 @@ pub(crate) fn new_upstream(
                     Box::new(GenericUpstream::new(u, options.query_timeout))
                         as Box<dyn adapter::Upstream>
                 })
-                .map_err(|err| format!("create udp upstream [{}] failed: {}", tag, err).into())
+                .map_err(|err| anyhow::anyhow!("create udp upstream [{}] failed: {}", tag, err))
         }
         option::UpstreamInnerOptions::TCPUpstream(tcp_options) => {
             super::TCPUpstream::new(manager, logger, tag.clone(), tcp_options)
@@ -41,65 +41,65 @@ pub(crate) fn new_upstream(
                     Box::new(GenericUpstream::new(u, options.query_timeout))
                         as Box<dyn adapter::Upstream>
                 })
-                .map_err(|err| format!("create tcp upstream [{}] failed: {}", tag, err).into())
+                .map_err(|err| anyhow::anyhow!("create tcp upstream [{}] failed: {}", tag, err))
         }
 
         option::UpstreamInnerOptions::DHCPUpstream(dhcp_options) => {
             cfg_if::cfg_if! {
-                if #[cfg(feature = "upstream-dhcp-support")] {
+                if #[cfg(feature = "upstream-dhcp")] {
                     super::DHCPUpstream::new(manager, logger, tag.clone(), dhcp_options)
                         .map(|u| {
                             Box::new(GenericUpstream::new(u, options.query_timeout))
                                 as Box<dyn adapter::Upstream>
                         })
-                        .map_err(|err| format!("create dhcp upstream [{}] failed: {}", tag, err).into())
+                        .map_err(|err| anyhow::anyhow!("create dhcp upstream [{}] failed: {}", tag, err))
                 } else {
-                    Err("dhcp upstream is not supported".into())
+                    Err("dhcp upstream is not supported")
                 }
             }
         }
 
         option::UpstreamInnerOptions::TLSUpstream(tls_options) => {
             cfg_if::cfg_if! {
-                if #[cfg(feature = "upstream-tls-support")] {
+                if #[cfg(feature = "upstream-tls")] {
                     super::TLSUpstream::new(manager, logger, tag.clone(), tls_options)
                         .map(|u| {
                             Box::new(GenericUpstream::new(u, options.query_timeout))
                                 as Box<dyn adapter::Upstream>
                         })
-                        .map_err(|err| format!("create tls upstream [{}] failed: {}", tag, err).into())
+                        .map_err(|err| anyhow::anyhow!("create tls upstream [{}] failed: {}", tag, err))
                 } else {
-                    Err("tls upstream is not supported".into())
+                    Err(anyhow::anyhow("tls upstream is not supported"))
                 }
             }
         }
 
         option::UpstreamInnerOptions::HTTPSUpstream(https_options) => {
             cfg_if::cfg_if! {
-                if #[cfg(all(feature = "upstream-https-support", feature = "upstream-tls-support"))] {
+                if #[cfg(all(feature = "upstream-https", feature = "upstream-tls"))] {
                     super::HTTPSUpstream::new(manager, logger, tag.clone(), https_options)
                         .map(|u| {
                             Box::new(GenericUpstream::new(u, options.query_timeout))
                                 as Box<dyn adapter::Upstream>
                         })
-                        .map_err(|err| format!("create https upstream [{}] failed: {}", tag, err).into())
+                        .map_err(|err| anyhow::anyhow!("create https upstream [{}] failed: {}", tag, err))
                 } else {
-                    Err("https upstream is not supported".into())
+                    Err(anyhow::anyhow("https upstream is not supported"))
                 }
             }
         }
 
         option::UpstreamInnerOptions::QUICUpstream(quic_options) => {
             cfg_if::cfg_if! {
-                if #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))] {
+                if #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))] {
                     super::QUICUpstream::new(manager, logger, tag.clone(), quic_options)
                         .map(|u| {
                             Box::new(GenericUpstream::new(u, options.query_timeout))
                                 as Box<dyn adapter::Upstream>
                         })
-                        .map_err(|err| format!("create quic upstream [{}] failed: {}", tag, err).into())
+                        .map_err(|err| anyhow::anyhow!("create quic upstream [{}] failed: {}", tag, err))
                 } else {
-                    Err("quic upstream is not supported".into())
+                    Err(anyhow::anyhow("quic upstream is not supported"))
                 }
             }
         }
@@ -123,7 +123,7 @@ impl<T: adapter::Upstream> GenericUpstream<T> {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &mut Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Message> {
         let fut = self.upstream.exchange(log_tracker, request);
         match self.query_timeout {
             Some(timeout) => match tokio::time::timeout(timeout, fut).await {
@@ -137,7 +137,7 @@ impl<T: adapter::Upstream> GenericUpstream<T> {
                         "exchange {} timeout",
                         &info
                     );
-                    Err(format!("exchange {} timeout", info).into())
+                    Err(anyhow::anyhow!("exchange {} timeout", info))
                 }
             },
             None => fut.await,
@@ -147,11 +147,11 @@ impl<T: adapter::Upstream> GenericUpstream<T> {
 
 #[async_trait::async_trait]
 impl<T: adapter::Upstream> adapter::Common for GenericUpstream<T> {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         self.upstream.start().await
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         self.upstream.close().await
     }
 }
@@ -178,7 +178,7 @@ impl<T: adapter::Upstream> adapter::Upstream for GenericUpstream<T> {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &mut Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Message> {
         self.exchange_wrapper(log_tracker, request).await
     }
 }
@@ -187,13 +187,13 @@ lazy_static::lazy_static! {
     static ref SUPPORTED_UPSTREAM_TYPES: Vec<&'static str> = {
         let mut types = vec!["tcp", "udp"];
 
-        #[cfg(feature = "upstream-tls-support")]
+        #[cfg(feature = "upstream-tls")]
         types.push("tls");
 
-        #[cfg(all(feature = "upstream-https-support", feature = "upstream-tls-support"))]
+        #[cfg(all(feature = "upstream-https", feature = "upstream-tls"))]
         types.push("https");
 
-        #[cfg(all(feature = "upstream-quic-support", feature = "upstream-tls-support"))]
+        #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
         types.push("quic");
 
         types

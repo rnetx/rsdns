@@ -1,9 +1,7 @@
 use std::{
     collections::HashMap,
-    error::Error,
     marker::PhantomData,
     sync::{
-        self,
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
@@ -14,7 +12,6 @@ use hickory_proto::op::Message;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     sync::{mpsc, oneshot},
-    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -26,7 +23,6 @@ const DEFAULT_RECV_BUFFER_SIZE: usize = 65535;
 pub(super) struct PipelineStream<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> {
     task_sender: mpsc::Sender<(u16, Vec<u8>, oneshot::Sender<Message>)>,
     token: CancellationToken,
-    handler: Arc<sync::Mutex<Option<JoinHandle<()>>>>,
     n: Arc<AtomicUsize>,
     _marker: PhantomData<S>,
 }
@@ -37,7 +33,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> Clone for PipelineStream<S
         Self {
             task_sender: self.task_sender.clone(),
             token: self.token.clone(),
-            handler: self.handler.clone(),
             n: self.n.clone(),
             _marker: PhantomData,
         }
@@ -49,13 +44,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> PipelineStream<S
         let (task_sender, task_receiver) = mpsc::channel(DEFAULT_MAX_TASK);
         let token = CancellationToken::new();
         let token_cloned = token.clone();
-        let handler = tokio::spawn(async move {
+        tokio::spawn(async move {
             Self::stream_handle(logger, stream, token_cloned, task_receiver).await;
         });
         Self {
             task_sender,
             token,
-            handler: Arc::new(sync::Mutex::new(Some(handler))),
             n: Arc::new(AtomicUsize::new(1)),
             _marker: PhantomData,
         }
@@ -137,34 +131,33 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static> PipelineStream<S
         self.token.is_cancelled()
     }
 
-    pub(super) async fn exchange(
-        &self,
-        request: &Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    pub(super) async fn exchange(&self, request: &Message) -> anyhow::Result<Message> {
         if self.is_cancelled() {
-            return Err("cancelled".into());
+            return Err(anyhow::anyhow!("cancelled"));
         }
-        let data = request.to_vec()?;
+        let data = request
+            .to_vec()
+            .map_err(|err| anyhow::anyhow!("serialize request failed: {}", err))?;
         let (sender, receiver) = oneshot::channel();
         let token = self.token.clone();
         tokio::select! {
           _ = token.cancelled() => {
-            return Err("cancelled".into());
+            return Err(anyhow::anyhow!("cancelled"));
           }
           res = self.task_sender.send((request.id(), data, sender)) => {
             if res.is_err() {
-              return Err("task send failed".into());
+              return Err(anyhow::anyhow!("task send failed"));
             }
           }
         }
         tokio::select! {
           _ = token.cancelled() => {
-            return Err("cancelled".into());
+            return Err(anyhow::anyhow!("cancelled"));
           }
           res = receiver => {
             match res {
               Ok(message) => Ok(message),
-              Err(_) => Err("message receive failed".into())
+              Err(_) => Err(anyhow::anyhow!("message receive failed"))
             }
           }
         }
@@ -175,9 +168,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> Drop for PipelineStream<S>
     fn drop(&mut self) {
         if self.n.fetch_sub(1, Ordering::Relaxed) == 1 {
             self.token.cancel();
-            if let Some(handler) = self.handler.lock().unwrap().take() {
-                handler.abort();
-            }
         }
     }
 }

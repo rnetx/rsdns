@@ -1,6 +1,9 @@
-use std::{collections::HashMap, error::Error, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
-use hickory_proto::{op::{Message, MessageType, OpCode}, rr::RecordType};
+use hickory_proto::{
+    op::{Message, MessageType, OpCode},
+    rr::RecordType,
+};
 use rand::Rng;
 use serde::Deserialize;
 use tokio::{sync::RwLock, task::JoinSet};
@@ -61,17 +64,15 @@ impl Prefer {
         logger: Box<dyn log::Logger>,
         tag: String,
         mut options: serde_yaml::Value,
-    ) -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Box<dyn adapter::ExecutorPlugin>> {
         if options.as_mapping().map(|m| m.len() == 0).unwrap_or(false) {
             options = serde_yaml::Value::Null;
         }
         let (upstream_tag, strategy) = if !options.is_null() {
             let options = Options::deserialize(options)
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("failed to deserialize options: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("failed to deserialize options: {}", err))?;
             if options.upstream.is_empty() {
-                return Err("missing upstream".into());
+                return Err(anyhow::anyhow!("missing upstream"));
             }
             (Some(options.upstream), Some(options.strategy))
         } else {
@@ -119,21 +120,19 @@ impl Prefer {
 
 #[async_trait::async_trait]
 impl adapter::Common for Prefer {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         if let (Some(upstream_tag), Some(_)) = (&self.upstream_tag, &self.strategy) {
             let upstream = self
                 .manager
                 .get_upstream(upstream_tag)
                 .await
-                .ok_or_else::<Box<dyn Error + Send + Sync>, _>(|| {
-                    format!("upstream [{}] not found", upstream_tag).into()
-                })?;
+                .ok_or_else(|| anyhow::anyhow!("upstream [{}] not found", upstream_tag))?;
             self.upstream.write().await.replace(upstream);
         }
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -148,25 +147,18 @@ impl adapter::ExecutorPlugin for Prefer {
         TYPE
     }
 
-    async fn prepare_workflow_args(
-        &self,
-        mut args: serde_yaml::Value,
-    ) -> Result<u16, Box<dyn Error + Send + Sync>> {
+    async fn prepare_workflow_args(&self, mut args: serde_yaml::Value) -> anyhow::Result<u16> {
         if args.as_mapping().map(|m| m.len() == 0).unwrap_or(false) {
             args = serde_yaml::Value::Null;
         }
         let args = if !args.is_null() {
             let args = WorkflowArgsPrepare::deserialize(args)
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("failed to deserialize args: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("failed to deserialize args: {}", err))?;
             let upstream = self
                 .manager
                 .get_upstream(&args.upstream)
                 .await
-                .ok_or_else::<Box<dyn Error + Send + Sync>, _>(|| {
-                    format!("upstream [{}] not found", args.upstream).into()
-                })?;
+                .ok_or_else(|| anyhow::anyhow!("upstream [{}] not found", args.upstream))?;
             Some(WorkflowArgs {
                 upstream,
                 strategy: args.strategy,
@@ -175,7 +167,9 @@ impl adapter::ExecutorPlugin for Prefer {
             None
         };
         if args.is_none() && self.upstream_tag.is_none() {
-            return Err("missing args, because plugin options is empty".into());
+            return Err(anyhow::anyhow!(
+                "missing args, because plugin options is empty"
+            ));
         }
         let mut args_map = self.args_map.write().await;
         let mut rng = rand::thread_rng();
@@ -192,7 +186,7 @@ impl adapter::ExecutorPlugin for Prefer {
         &self,
         ctx: &mut adapter::Context,
         args_id: u16,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         let request_type = Self::check_is_ip_request(ctx.request());
         if request_type.is_none() {
             debug!(
@@ -272,7 +266,7 @@ impl adapter::ExecutorPlugin for Prefer {
                 join_set.spawn(async move {
                     tokio::select! {
                         _ = token_handle.cancelled_owned() => {
-                            (Err("cancelled".into()), false)
+                            (Err(anyhow::anyhow!("cancelled")), false)
                         }
                         res = upstream.exchange(Some(&log_tracker), &mut request) => {
                             let res = res.map(|response| {
@@ -294,7 +288,7 @@ impl adapter::ExecutorPlugin for Prefer {
                 join_set.spawn(async move {
                     tokio::select! {
                         _ = token_handle_extra.cancelled_owned() => {
-                            (Err("cancelled".into()), false)
+                            (Err(anyhow::anyhow!("cancelled")), false)
                         }
                         res = upstream_extra.exchange(Some(&log_tracker_extra), &mut request_extra) => {
                             let res = res.map(|response| {
@@ -391,7 +385,7 @@ impl adapter::ExecutorPlugin for Prefer {
                         "failed to exchange: {}",
                         err
                     );
-                    return Err(err.into());
+                    return Err(anyhow::anyhow!("{}", err));
                 }
             }
         }

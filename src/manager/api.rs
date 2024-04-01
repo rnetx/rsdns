@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{body::Body, extract::Request, response::Response};
 use futures_util::Future;
@@ -77,6 +77,10 @@ impl APIServer {
             );
         }
 
+        router = router.fallback(axum::routing::any(
+            || async move { http::StatusCode::NOT_FOUND },
+        ));
+
         // Auth
         if let Some(secret) = &self.secret {
             router = router.layer(AsyncRequireAuthorizationLayer::new(AuthMiddleware {
@@ -87,7 +91,7 @@ impl APIServer {
         router
     }
 
-    pub(super) async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub(super) async fn start(&self) -> anyhow::Result<()> {
         let tcp_listener = TcpListener::bind(&self.listen).await?;
         info!(self.logger, "API server listen on {}", self.listen);
         let router = self.get_router().await;

@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
@@ -74,10 +73,10 @@ impl IPRange {
 }
 
 impl FromStr for IPRange {
-    type Err = Box<dyn Error + Send + Sync>;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let err_fn = || Err(Into::<Self::Err>::into(format!("invalid ip-range: {}", s)));
+        let err_fn = || Err(anyhow::anyhow!("invalid ip-range: {}", s));
 
         if let Ok(ip) = s.parse::<IpAddr>() {
             return Ok(match ip {
@@ -210,10 +209,10 @@ impl IPv4Range {
 }
 
 impl FromStr for IPv4Range {
-    type Err = Box<dyn Error + Send + Sync>;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let err_fn = || Err(Into::<Self::Err>::into(format!("invalid ip-range: {}", s)));
+        let err_fn = || Err(anyhow::anyhow!("invalid ip-range: {}", s));
 
         if let Ok(ip) = s.parse::<Ipv4Addr>() {
             return Ok(Self::Single(ip));
@@ -326,10 +325,10 @@ impl IPv6Range {
 }
 
 impl FromStr for IPv6Range {
-    type Err = Box<dyn Error + Send + Sync>;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let err_fn = || Err(Into::<Self::Err>::into(format!("invalid ip-range: {}", s)));
+        let err_fn = || Err(anyhow::anyhow!("invalid ip-range: {}", s));
 
         if let Ok(ip) = s.parse::<Ipv6Addr>() {
             return Ok(Self::Single(ip));

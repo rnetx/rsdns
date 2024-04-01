@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     fmt,
     future::Future,
     io,
@@ -15,7 +14,7 @@ use bytes::{Buf, BufMut};
 use hickory_proto::op::Message;
 use http_body_util::BodyExt;
 
-use crate::{adapter, debug, error, info, log, option};
+use crate::{adapter, common, debug, error, info, log, option};
 
 use super::network;
 
@@ -40,7 +39,7 @@ impl HTTPSUpstream {
         logger: Arc<Box<dyn log::Logger>>,
         tag: String,
         options: option::HTTPSUpstreamOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         let address = network::SocksAddr::parse_with_default_port(&options.address, 443)?;
         let dialer = network::Dialer::new(manager.clone(), options.dialer.unwrap_or_default())?;
         let (tls_client_config, server_name) = super::new_tls_config(options.tls)?;
@@ -54,7 +53,7 @@ impl HTTPSUpstream {
         let host = options.host.unwrap_or(server_name.clone());
         let server_name = match rustls::ServerName::try_from(server_name.as_str()) {
             Ok(v) => v,
-            Err(e) => return Err(format!("invalid server-name: {}", e).into()),
+            Err(e) => return Err(anyhow::anyhow!("invalid server-name: {}", e)),
         };
         let bootstrap = if address.is_domain_addr() {
             if let Some(bootstrap_options) = options.bootstrap {
@@ -66,7 +65,7 @@ impl HTTPSUpstream {
             None
         };
         if address.is_domain_addr() && bootstrap.is_none() && !dialer.domain_support() {
-            return Err("domain address not supported, because dialer is unsupported, and bootstrap is not set".into());
+            return Err(anyhow::anyhow!("domain address not supported, because dialer is unsupported, and bootstrap is not set"));
         }
         let path = options.path.unwrap_or(DEFAULT_PATH.to_owned());
         let host = {
@@ -93,13 +92,9 @@ impl HTTPSUpstream {
         if let Some(map) = options.header {
             for (k, v) in map {
                 let key = http::HeaderName::try_from(&k)
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("invalid header key: {}, {}", &k, err).into()
-                    })?;
+                    .map_err(|err| anyhow::anyhow!("invalid header key: {}, {}", &k, err))?;
                 let vaule = http::HeaderValue::try_from(&v)
-                    .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                        format!("invalid header value: {}, {}", &v, err).into()
-                    })?;
+                    .map_err(|err| anyhow::anyhow!("invalid header value: {}, {}", &v, err))?;
                 header.insert(key, vaule);
             }
         }
@@ -126,7 +121,7 @@ impl HTTPSUpstream {
         } else {
             let client: Option<GenericHTTPSClient> = {
                 cfg_if::cfg_if! {
-                    if #[cfg(all(feature = "upstream-https-support", feature = "upstream-quic-support", feature = "upstream-tls-support"))] {
+                    if #[cfg(all(feature = "upstream-https", feature = "upstream-quic", feature = "upstream-tls"))] {
                         Some(GenericHTTPSClient::from(http3::HTTP3Client::new(
                             logger.clone(),
                             address,
@@ -144,7 +139,7 @@ impl HTTPSUpstream {
                 }
             };
             if client.is_none() {
-                return Err("http3 is not supported".into());
+                return Err(anyhow::anyhow!("http3 is not supported"));
             }
             client.unwrap()
         };
@@ -160,15 +155,10 @@ impl HTTPSUpstream {
         })
     }
 
-    async fn exchange_wrapper(
-        &self,
-        request: &Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    async fn exchange_wrapper(&self, request: &Message) -> anyhow::Result<Message> {
         let request_bytes = request
             .to_vec()
-            .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("serialize request failed: {}", err).into()
-            })?;
+            .map_err(|err| anyhow::anyhow!("serialize request failed: {}", err))?;
         let response = if self.use_post {
             let request_bytes = bytes::Bytes::from(request_bytes);
             let uri = http::Uri::builder()
@@ -176,9 +166,7 @@ impl HTTPSUpstream {
                 .authority(self.host.as_bytes())
                 .path_and_query(&self.path)
                 .build()
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("invalid uri: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("invalid uri: {}", err))?;
             let mut request_builder = http::Request::builder().uri(uri).method(http::Method::POST);
             for (k, v) in self.header.iter() {
                 request_builder = request_builder.header(k, v.clone());
@@ -201,9 +189,7 @@ impl HTTPSUpstream {
                     }
                 })
                 .build()
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("invalid uri: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("invalid uri: {}", err))?;
             let mut request_builder = http::Request::builder().uri(uri).method(http::Method::GET);
             for (k, v) in self.header.iter() {
                 request_builder = request_builder.header(k, v.clone());
@@ -212,24 +198,21 @@ impl HTTPSUpstream {
             self.client.get(request).await?
         };
         if response.status() != http::StatusCode::OK {
-            return Err(format!("response status: {}", response.status()).into());
+            return Err(anyhow::anyhow!("response status: {}", response.status()));
         }
-        let result = Message::from_vec(&response.body())
-            .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("deserialize response failed: {}", err).into()
-            });
-        result
+        Message::from_vec(&response.body())
+            .map_err(|err| anyhow::anyhow!("deserialize response failed: {}", err))
     }
 }
 
 #[async_trait::async_trait]
 impl adapter::Common for HTTPSUpstream {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         self.client.start().await?;
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         self.client.close().await?;
         Ok(())
     }
@@ -257,7 +240,7 @@ impl adapter::Upstream for HTTPSUpstream {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &mut Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Message> {
         let query_info = super::show_query(&request);
         info!(
             self.logger,
@@ -312,9 +295,9 @@ enum GenericHTTPSClient {
     HTTPS(HTTPSClient),
 
     #[cfg(all(
-        feature = "upstream-https-support",
-        feature = "upstream-quic-support",
-        feature = "upstream-tls-support"
+        feature = "upstream-https",
+        feature = "upstream-quic",
+        feature = "upstream-tls"
     ))]
     HTTP3(http3::HTTP3Client),
 }
@@ -326,9 +309,9 @@ impl From<HTTPSClient> for GenericHTTPSClient {
 }
 
 #[cfg(all(
-    feature = "upstream-https-support",
-    feature = "upstream-quic-support",
-    feature = "upstream-tls-support"
+    feature = "upstream-https",
+    feature = "upstream-quic",
+    feature = "upstream-tls"
 ))]
 impl From<http3::HTTP3Client> for GenericHTTPSClient {
     fn from(value: http3::HTTP3Client) -> Self {
@@ -337,27 +320,27 @@ impl From<http3::HTTP3Client> for GenericHTTPSClient {
 }
 
 impl GenericHTTPSClient {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         match self {
             Self::HTTPS(client) => client.start().await,
 
             #[cfg(all(
-                feature = "upstream-https-support",
-                feature = "upstream-quic-support",
-                feature = "upstream-tls-support"
+                feature = "upstream-https",
+                feature = "upstream-quic",
+                feature = "upstream-tls"
             ))]
             Self::HTTP3(client) => client.start().await,
         }
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         match self {
             Self::HTTPS(client) => client.close().await,
 
             #[cfg(all(
-                feature = "upstream-https-support",
-                feature = "upstream-quic-support",
-                feature = "upstream-tls-support"
+                feature = "upstream-https",
+                feature = "upstream-quic",
+                feature = "upstream-tls"
             ))]
             Self::HTTP3(client) => client.close().await,
         }
@@ -368,9 +351,9 @@ impl GenericHTTPSClient {
             Self::HTTPS(client) => client.dependency(),
 
             #[cfg(all(
-                feature = "upstream-https-support",
-                feature = "upstream-quic-support",
-                feature = "upstream-tls-support"
+                feature = "upstream-https",
+                feature = "upstream-quic",
+                feature = "upstream-tls"
             ))]
             Self::HTTP3(client) => client.dependency(),
         }
@@ -379,7 +362,7 @@ impl GenericHTTPSClient {
     async fn post(
         &self,
         req: http::Request<bytes::Bytes>,
-    ) -> Result<http::Response<bytes::Bytes>, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<http::Response<bytes::Bytes>> {
         match self {
             Self::HTTPS(client) => {
                 let (parts, body) = req.into_parts();
@@ -395,9 +378,9 @@ impl GenericHTTPSClient {
             }
 
             #[cfg(all(
-                feature = "upstream-https-support",
-                feature = "upstream-quic-support",
-                feature = "upstream-tls-support"
+                feature = "upstream-https",
+                feature = "upstream-quic",
+                feature = "upstream-tls"
             ))]
             Self::HTTP3(client) => {
                 let (parts, req_body) = req.into_parts();
@@ -418,10 +401,7 @@ impl GenericHTTPSClient {
         }
     }
 
-    async fn get(
-        &self,
-        req: http::Request<()>,
-    ) -> Result<http::Response<bytes::Bytes>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, req: http::Request<()>) -> anyhow::Result<http::Response<bytes::Bytes>> {
         match self {
             Self::HTTPS(client) => {
                 let (parts, _) = req.into_parts();
@@ -437,9 +417,9 @@ impl GenericHTTPSClient {
             }
 
             #[cfg(all(
-                feature = "upstream-https-support",
-                feature = "upstream-quic-support",
-                feature = "upstream-tls-support"
+                feature = "upstream-https",
+                feature = "upstream-quic",
+                feature = "upstream-tls"
             ))]
             Self::HTTP3(client) => {
                 let mut http3_connection = client.get_http3_connection().await?;
@@ -674,7 +654,7 @@ impl HTTPSClient {
         }
     }
 
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         self.dialer.start().await;
         if let Some(bootstrap) = self.bootstrap.as_ref() {
             bootstrap.start().await?;
@@ -682,7 +662,7 @@ impl HTTPSClient {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         self.dialer.close().await;
         Ok(())
     }
@@ -715,13 +695,12 @@ impl DerefMut for HTTPSClient {
 // HTTP3
 
 #[cfg(all(
-    feature = "upstream-https-support",
-    feature = "upstream-quic-support",
-    feature = "upstream-tls-support"
+    feature = "upstream-https",
+    feature = "upstream-quic",
+    feature = "upstream-tls"
 ))]
 mod http3 {
     use std::{
-        error::Error,
         future,
         ops::{Deref, DerefMut},
         sync::{
@@ -731,10 +710,7 @@ mod http3 {
         time::Duration,
     };
 
-    use tokio::{
-        sync::{Mutex, RwLock},
-        task::JoinHandle,
-    };
+    use tokio::sync::{Mutex, RwLock};
     use tokio_util::sync::CancellationToken;
 
     pub(super) struct HTTP3Client {
@@ -748,7 +724,7 @@ mod http3 {
         //
         last_use: Arc<AtomicI64>,
         connection: Arc<RwLock<Option<HTTP3Connection>>>,
-        handler: Mutex<Option<JoinHandle<()>>>,
+        canceller: Mutex<Option<super::common::Canceller>>,
     }
 
     impl HTTP3Client {
@@ -773,11 +749,11 @@ mod http3 {
                 dialer: Arc::new(dialer),
                 last_use: Arc::new(AtomicI64::new(0)),
                 connection: Arc::new(RwLock::new(None)),
-                handler: Mutex::new(None),
+                canceller: Mutex::new(None),
             }
         }
 
-        pub(super) async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        pub(super) async fn start(&self) -> anyhow::Result<()> {
             self.dialer.start().await;
             if let Some(bootstrap) = self.bootstrap.as_ref() {
                 bootstrap.start().await?;
@@ -785,15 +761,17 @@ mod http3 {
             let connection = self.connection.clone();
             let last_use = self.last_use.clone();
             let idle_timeout = self.idle_timeout;
-            let handler =
-                tokio::spawn(async move { Self::handle(connection, last_use, idle_timeout).await });
-            self.handler.lock().await.replace(handler);
+            let (canceller, canceller_guard) = super::common::new_canceller();
+            tokio::spawn(async move {
+                Self::handle(connection, last_use, idle_timeout, canceller_guard).await
+            });
+            self.canceller.lock().await.replace(canceller);
             Ok(())
         }
 
-        pub(super) async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-            if let Some(handler) = self.handler.lock().await.take() {
-                handler.abort();
+        pub(super) async fn close(&self) -> anyhow::Result<()> {
+            if let Some(mut canceller) = self.canceller.lock().await.take() {
+                canceller.cancel_and_wait().await;
             }
             if let Some(connection) = self.connection.write().await.take() {
                 connection.set_close_tag();
@@ -813,6 +791,7 @@ mod http3 {
             connection: Arc<RwLock<Option<HTTP3Connection>>>,
             last_use: Arc<AtomicI64>,
             idle_timeout: Duration,
+            canceller_guard: super::common::CancellerGuard,
         ) {
             loop {
                 tokio::select! {
@@ -829,6 +808,9 @@ mod http3 {
                                 connection.take();
                             }
                         }
+                    }
+                    _ = canceller_guard.cancelled() => {
+                        break;
                     }
                 }
             }
@@ -847,9 +829,7 @@ mod http3 {
             }
         }
 
-        pub(super) async fn get_http3_connection(
-            &self,
-        ) -> Result<HTTP3Connection, Box<dyn Error + Send + Sync>> {
+        pub(super) async fn get_http3_connection(&self) -> anyhow::Result<HTTP3Connection> {
             let mut connection = self.connection.read().await.clone();
             if let Some(connection) = connection.take() {
                 if !connection.is_closed() {
@@ -906,7 +886,7 @@ mod http3 {
             logger: Arc<Box<dyn super::log::Logger>>,
             endpoint: quinn::Endpoint,
             connection: h3_quinn::Connection,
-        ) -> Result<Self, h3::Error> {
+        ) -> anyhow::Result<Self, h3::Error> {
             let (mut connection, send_request) = h3::client::new(connection).await?;
             let token = CancellationToken::new();
             let token_driver = token.clone();

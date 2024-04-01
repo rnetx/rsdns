@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, net::IpAddr, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::IpAddr, pin::Pin, sync::Arc, time::Duration};
 
 use futures_util::Future;
 use rand::Rng;
@@ -95,16 +95,14 @@ impl IPSet {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: serde_yaml::Value,
-    ) -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>> {
-        let options =
-            Options::deserialize(options).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize options: {}", err).into()
-            })?;
+    ) -> anyhow::Result<Box<dyn adapter::ExecutorPlugin>> {
+        let options = Options::deserialize(options)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize options: {}", err))?;
         let logger = Arc::new(logger);
 
         match (&options.ipv4_name, &options.ipv6_name) {
             (Some(_), Some(_)) => {}
-            _ => return Err("missing ipv4-name and ipv6-name".into()),
+            _ => return Err(anyhow::anyhow!("missing ipv4-name and ipv6-name")),
         }
 
         let s = Self {
@@ -242,7 +240,7 @@ impl IPSet {
 
 #[async_trait::async_trait]
 impl adapter::Common for IPSet {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         let (session4, ipv4_name, ipv4_mask) = if let Some(ipv4_name) = self.ipv4_name.as_ref() {
             let mut session = ipset::Session::<ipset::types::HashNet>::new(ipv4_name.clone());
             session
@@ -252,9 +250,7 @@ impl adapter::Common for IPSet {
                     }
                     c.with_ipv6(false)?.build()
                 })
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|e| {
-                    format!("failed to create ipset session (ipv4): {}", e).into()
-                })?;
+                .map_err(|e| anyhow::anyhow!("failed to create ipset session (ipv4): {}", e))?;
             (
                 Some(session),
                 Some(ipv4_name.clone()),
@@ -272,9 +268,7 @@ impl adapter::Common for IPSet {
                     }
                     c.with_ipv6(true)?.build()
                 })
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|e| {
-                    format!("failed to create ipset session (ipv6): {}", e).into()
-                })?;
+                .map_err(|e| anyhow::anyhow!("failed to create ipset session (ipv6): {}", e))?;
             (
                 Some(session),
                 Some(ipv6_name.clone()),
@@ -308,7 +302,7 @@ impl adapter::Common for IPSet {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if let Some(mut canceller) = self.canceller.lock().await.take() {
             canceller.cancel_and_wait().await;
         }
@@ -326,20 +320,14 @@ impl adapter::ExecutorPlugin for IPSet {
         TYPE
     }
 
-    async fn prepare_workflow_args(
-        &self,
-        args: serde_yaml::Value,
-    ) -> Result<u16, Box<dyn Error + Send + Sync>> {
+    async fn prepare_workflow_args(&self, args: serde_yaml::Value) -> anyhow::Result<u16> {
         let args = if args.is_string() {
             WorkflowMode::deserialize(args)
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("failed to deserialize args: {}", err).into()
-                })
+                .map_err(|err| anyhow::anyhow!("failed to deserialize args: {}", err))
                 .map(|mode| WorkflowArgs { mode })?
         } else {
-            WorkflowArgs::deserialize(args).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize args: {}", err).into()
-            })?
+            WorkflowArgs::deserialize(args)
+                .map_err(|err| anyhow::anyhow!("failed to deserialize args: {}", err))?
         };
         let mut args_map = self.args_map.write().await;
         let mut rng = rand::thread_rng();
@@ -356,7 +344,7 @@ impl adapter::ExecutorPlugin for IPSet {
         &self,
         ctx: &mut adapter::Context,
         args_id: u16,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         let args = self.args_map.read().await.get(&args_id).cloned().unwrap();
         match args.mode {
             WorkflowMode::AddResponseIP => {

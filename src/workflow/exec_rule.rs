@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    error::Error,
     net::IpAddr,
     ops::{Deref, DerefMut},
     str::FromStr,
@@ -34,9 +33,7 @@ pub(super) enum ExecItemRule {
 }
 
 impl ExecItemRule {
-    pub(super) fn new(
-        options: option::ExecItemRuleOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub(super) fn new(options: option::ExecItemRuleOptions) -> anyhow::Result<Self> {
         match options {
             option::ExecItemRuleOptions::Mark(mark) => Ok(Self::Mark(mark)),
             option::ExecItemRuleOptions::Metadata(m) => Ok(Self::Metadata(m)),
@@ -58,7 +55,7 @@ impl ExecItemRule {
     pub(super) async fn check(
         &self,
         manager: &Arc<Box<dyn adapter::Manager>>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<()> {
         match self {
             ExecItemRule::Plugin(v) => {
                 let mut p = v.write().await;
@@ -71,7 +68,7 @@ impl ExecItemRule {
                 let uu = manager
                     .get_upstream(&t)
                     .await
-                    .ok_or(format!("upstream [{}] not found", t))?;
+                    .ok_or(anyhow::anyhow!("upstream [{}] not found", t))?;
                 upstream.replace(uu);
             }
             ExecItemRule::JumpTo(v) => {
@@ -83,7 +80,7 @@ impl ExecItemRule {
                     let w = manager
                         .get_workflow(&t)
                         .await
-                        .ok_or(format!("workflow [{}] not found", t))?;
+                        .ok_or(anyhow::anyhow!("workflow [{}] not found", t))?;
                     ww.push(w);
                 }
                 workflows.replace(ww);
@@ -95,7 +92,7 @@ impl ExecItemRule {
                 let w = manager
                     .get_workflow(&t)
                     .await
-                    .ok_or(format!("workflow [{}] not found", t))?;
+                    .ok_or(anyhow::anyhow!("workflow [{}] not found", t))?;
                 workflow.replace(w);
             }
             _ => {}
@@ -107,7 +104,7 @@ impl ExecItemRule {
         &self,
         logger: &Arc<Box<dyn log::Logger>>,
         ctx: &mut adapter::Context,
-    ) -> Result<adapter::ReturnMode, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<adapter::ReturnMode> {
         match self {
             ExecItemRule::Mark(mark) => {
                 ctx.set_mark(*mark);
@@ -276,7 +273,7 @@ pub(super) enum Return {
 }
 
 impl FromStr for Return {
-    type Err = Box<dyn Error + Send + Sync>;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
@@ -286,7 +283,7 @@ impl FromStr for Return {
             "failure" => Ok(Self::Failure),
             "nxdomain" => Ok(Self::NxDomain),
             "refused" => Ok(Self::Refused),
-            _ => Err(format!("invalid return: {:?}", s).into()),
+            _ => Err(anyhow::anyhow!("invalid return: {:?}", s)),
         }
     }
 }

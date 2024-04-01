@@ -1,4 +1,4 @@
-use std::{error::Error, io, sync::Arc, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
 use hickory_proto::op::Message;
 use tokio::{
@@ -47,7 +47,7 @@ impl TLSUpstream {
         logger: Arc<Box<dyn log::Logger>>,
         tag: String,
         options: option::TLSUpstreamOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         let address = network::SocksAddr::parse_with_default_port(&options.address, 853)?;
         let dialer = Arc::new(network::Dialer::new(
             manager.clone(),
@@ -63,7 +63,7 @@ impl TLSUpstream {
         };
         let server_name = match rustls::ServerName::try_from(server_name.as_str()) {
             Ok(v) => v,
-            Err(e) => return Err(format!("invalid server-name: {}", e).into()),
+            Err(e) => return Err(anyhow::anyhow!("invalid server-name: {}", e)),
         };
         let bootstrap = if address.is_domain_addr() {
             if let Some(bootstrap_options) = options.bootstrap {
@@ -75,7 +75,7 @@ impl TLSUpstream {
             None
         };
         if address.is_domain_addr() && bootstrap.is_none() && !dialer.domain_support() {
-            return Err("domain address not supported, because dialer is unsupported, and bootstrap is not set".into());
+            return Err(anyhow::anyhow!("domain address not supported, because dialer is unsupported, and bootstrap is not set"));
         }
         Ok(Self {
             manager,
@@ -116,16 +116,11 @@ impl TLSUpstream {
             .await
     }
 
-    async fn exchange_wrapper(
-        &self,
-        request: &Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    async fn exchange_wrapper(&self, request: &Message) -> anyhow::Result<Message> {
         if !self.enable_pipeline {
             let request_bytes = request
                 .to_vec()
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("serialize request failed: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("serialize request failed: {}", err))?;
             let pool_lock = self.pool.read().await;
             let pool = pool_lock.as_ref().unwrap();
             let mut tls_stream = match pool.get().await {
@@ -134,9 +129,7 @@ impl TLSUpstream {
                     let new_tls_stream = self
                         .new_tls_stream()
                         .await
-                        .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                            format!("get tls stream failed: {}", err).into()
-                        })?;
+                        .map_err(|err| anyhow::anyhow!("get tls stream failed: {}", err))?;
                     debug!(self.logger, "new tls stream");
                     super::LogStream::new(self.logger.clone(), "close tls stream", new_tls_stream)
                 }
@@ -149,10 +142,8 @@ impl TLSUpstream {
             let length = tls_stream.read_u16().await?;
             let mut buf = vec![0u8; length as usize];
             tls_stream.read_exact(&mut buf).await?;
-            let result =
-                Message::from_vec(&buf).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("deserialize response failed: {}", err).into()
-                });
+            let result = Message::from_vec(&buf)
+                .map_err(|err| anyhow::anyhow!("deserialize response failed: {}", err));
             pool.put(tls_stream).await;
             result
         } else {
@@ -170,9 +161,7 @@ impl TLSUpstream {
                     let new_tls_stream = self
                         .new_tls_stream()
                         .await
-                        .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                            format!("handeshake tls stream failed: {}", err).into()
-                        })?;
+                        .map_err(|err| anyhow::anyhow!("handeshake tls stream failed: {}", err))?;
                     debug!(self.logger, "new tls pipeline stream");
                     let stream = super::LogStream::new(
                         self.logger.clone(),
@@ -204,7 +193,7 @@ impl TLSUpstream {
 
 #[async_trait::async_trait]
 impl adapter::Common for TLSUpstream {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         self.dialer.start().await;
         if let Some(bootstrap) = &self.bootstrap {
             bootstrap.start().await?;
@@ -225,7 +214,7 @@ impl adapter::Common for TLSUpstream {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if !self.enable_pipeline {
             if let Some(mut pool) = self.pool.write().await.take() {
                 pool.close().await;
@@ -264,7 +253,7 @@ impl adapter::Upstream for TLSUpstream {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &mut Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Message> {
         let query_info = super::show_query(&request);
         info!(
             self.logger,

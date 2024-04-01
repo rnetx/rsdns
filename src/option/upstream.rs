@@ -6,8 +6,6 @@ use std::{
 
 use serde::Deserialize;
 
-use crate::common;
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpstreamOptions {
     pub tag: String,
@@ -160,14 +158,18 @@ pub struct QUICUpstreamOptions {
 
 // TLS
 
+#[serde_with::serde_as]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpstreamTLSOptions {
     #[serde(rename = "server-name")]
     #[serde(default)]
     pub server_name: Option<String>,
+    #[serde(default)]
+    pub insecure: bool,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(rename = "server-ca-file")]
     #[serde(default)]
-    pub server_ca_file: common::SingleOrList<String>,
+    pub server_ca_file: Vec<String>,
     #[serde(rename = "client-cert-file")]
     #[serde(default)]
     pub client_cert_file: Option<String>,

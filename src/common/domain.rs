@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fmt, str::FromStr};
+use std::{collections::HashMap, fmt, str::FromStr};
 
 #[derive(Clone)]
 pub(crate) enum Domain {
@@ -9,13 +9,13 @@ pub(crate) enum Domain {
 }
 
 impl FromStr for Domain {
-    type Err = Box<dyn Error + Send + Sync>;
+    type Err = anyhow::Error;
 
     fn from_str(v: &str) -> Result<Self, Self::Err> {
         match v.split_once(':') {
             Some((t, s)) => {
                 if s.is_empty() {
-                    return Err("missing domain".into());
+                    return Err(anyhow::anyhow!("missing domain"));
                 }
                 match t {
                     "full" => Ok(Self::Full(s.to_string())),
@@ -24,18 +24,18 @@ impl FromStr for Domain {
                         let s = match regex::Regex::from_str(s) {
                             Ok(v) => v,
                             Err(e) => {
-                                return Err(format!("invalid regex: {}", e).into());
+                                return Err(anyhow::anyhow!("invalid regex: {}", e));
                             }
                         };
                         Ok(Self::Regex(s))
                     }
                     "keyword" => Ok(Self::Keyword(s.to_string())),
-                    _ => return Err(format!("unknown domain type: {}", t).into()),
+                    _ => return Err(anyhow::anyhow!("unknown domain type: {}", t)),
                 }
             }
             None => {
                 if v.is_empty() {
-                    return Err("missing domain".into());
+                    return Err(anyhow::anyhow!("missing domain"));
                 }
                 Ok(Self::Full(v.to_string()))
             }

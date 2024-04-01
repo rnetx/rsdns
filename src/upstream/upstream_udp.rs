@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     io::{self, IoSlice},
     sync::Arc,
     time::Duration,
@@ -42,7 +41,7 @@ impl UDPUpstream {
         logger: Arc<Box<dyn log::Logger>>,
         tag: String,
         options: option::UDPUpstreamOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         let address = network::SocksAddr::parse_with_default_port(&options.address, 53)?;
         let dialer = Arc::new(network::Dialer::new(
             manager.clone(),
@@ -58,7 +57,7 @@ impl UDPUpstream {
             None
         };
         if address.is_domain_addr() && bootstrap.is_none() && !dialer.domain_support() {
-            return Err("domain address not supported, because dialer is unsupported, and bootstrap is not set".into());
+            return Err(anyhow::anyhow!("domain address not supported, because dialer is unsupported, and bootstrap is not set"));
         }
         Ok(Self {
             manager,
@@ -102,25 +101,19 @@ impl UDPUpstream {
         .await
     }
 
-    async fn exchange_udp(
-        &self,
-        request: &Message,
-    ) -> Result<Option<Message>, Box<dyn Error + Send + Sync>> {
+    async fn exchange_udp(&self, request: &Message) -> anyhow::Result<Option<Message>> {
         let request_bytes = request
             .to_vec()
-            .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("serialize request failed: {}", err).into()
-            })?;
+            .map_err(|err| anyhow::anyhow!("serialize request failed: {}", err))?;
         let udp_pool_lock = self.udp_pool.read().await;
         let udp_pool = udp_pool_lock.as_ref().unwrap();
         let s = match udp_pool.get().await {
             Some(v) => v,
             None => {
-                let (new_udp_socket, remote_addr) = self.new_udp_socket().await.map_err::<Box<
-                    dyn Error + Send + Sync,
-                >, _>(
-                    |err| format!("get udp socket failed: {}", err).into(),
-                )?;
+                let (new_udp_socket, remote_addr) = self
+                    .new_udp_socket()
+                    .await
+                    .map_err(|err| anyhow::anyhow!("get udp socket failed: {}", err))?;
                 debug!(self.logger, "new udp socket");
                 super::LogStream::new(
                     self.logger.clone(),
@@ -135,22 +128,16 @@ impl UDPUpstream {
             .await?;
         let mut buf = Vec::with_capacity(4096);
         udp_socket.recv_buf_from(&mut buf).await?;
-        let result = Message::from_vec(&buf).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-            format!("deserialize response failed: {}", err).into()
-        });
+        let result = Message::from_vec(&buf)
+            .map_err(|err| anyhow::anyhow!("deserialize response failed: {}", err));
         result.map(|m| if m.truncated() { None } else { Some(m) })
     }
 
-    async fn exchange_tcp(
-        &self,
-        request: &Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    async fn exchange_tcp(&self, request: &Message) -> anyhow::Result<Message> {
         if !self.enable_pipeline {
             let request_bytes = request
                 .to_vec()
-                .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("serialize request failed: {}", err).into()
-                })?;
+                .map_err(|err| anyhow::anyhow!("serialize request failed: {}", err))?;
             let tcp_pool_lock = self.tcp_pool.read().await;
             let tcp_pool = tcp_pool_lock.as_ref().unwrap();
             let mut tcp_stream = match tcp_pool.get().await {
@@ -159,9 +146,7 @@ impl UDPUpstream {
                     let new_tcp_stream = self
                         .new_tcp_stream()
                         .await
-                        .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                            format!("get tcp stream failed: {}", err).into()
-                        })?;
+                        .map_err(|err| anyhow::anyhow!("get tcp stream failed: {}", err))?;
                     debug!(self.logger, "new tcp stream");
                     super::LogStream::new(self.logger.clone(), "close tcp stream", new_tcp_stream)
                 }
@@ -176,10 +161,8 @@ impl UDPUpstream {
             let length = tcp_stream.read_u16().await?;
             let mut buf = Vec::with_capacity(length as usize);
             tcp_stream.read_buf(&mut buf).await?;
-            let result =
-                Message::from_vec(&buf).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                    format!("deserialize response failed: {}", err).into()
-                });
+            let result = Message::from_vec(&buf)
+                .map_err(|err| anyhow::anyhow!("deserialize response failed: {}", err));
             tcp_pool.put(tcp_stream).await;
             result
         } else {
@@ -197,9 +180,7 @@ impl UDPUpstream {
                     let new_tcp_stream = self
                         .new_tcp_stream()
                         .await
-                        .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                            format!("get tcp stream failed: {}", err).into()
-                        })?;
+                        .map_err(|err| anyhow::anyhow!("get tcp stream failed: {}", err))?;
                     debug!(self.logger, "new tcp pipeline stream");
                     let stream = super::LogStream::new(
                         self.logger.clone(),
@@ -232,7 +213,7 @@ impl UDPUpstream {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Message> {
         let result = self.exchange_udp(request).await?;
         if let Some(message) = result {
             Ok(message)
@@ -243,7 +224,9 @@ impl UDPUpstream {
                     { option_tracker = log_tracker },
                     "udp response is truncated, you can enable fallback-tcp"
                 );
-                return Err("udp response is truncated, you can enable fallback-tcp".into());
+                return Err(anyhow::anyhow!(
+                    "udp response is truncated, you can enable fallback-tcp"
+                ));
             }
             self.exchange_tcp(request).await
         }
@@ -252,7 +235,7 @@ impl UDPUpstream {
 
 #[async_trait::async_trait]
 impl adapter::Common for UDPUpstream {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         self.dialer.start().await;
         if let Some(bootstrap) = &self.bootstrap {
             bootstrap.start().await?;
@@ -276,7 +259,7 @@ impl adapter::Common for UDPUpstream {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         if self.fallback_tcp {
             if !self.enable_pipeline {
                 if let Some(mut pool) = self.tcp_pool.write().await.take() {
@@ -320,7 +303,7 @@ impl adapter::Upstream for UDPUpstream {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &mut Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Message> {
         let query_info = super::show_query(&request);
         info!(
             self.logger,

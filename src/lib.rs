@@ -10,6 +10,9 @@ pub mod upstream;
 #[allow(hidden_glob_reexports)]
 mod workflow;
 
+#[cfg(test)]
+mod tests;
+
 pub use listener::*;
 pub use manager::*;
 pub use option::*;

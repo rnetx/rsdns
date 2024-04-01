@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc};
+use std::sync::Arc;
 
 use hickory_proto::op::Message;
 
@@ -14,5 +14,5 @@ pub(crate) trait Upstream: super::Common + Send + Sync {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &mut Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>>;
+    ) -> anyhow::Result<Message>;
 }

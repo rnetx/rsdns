@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     io::IoSlice,
     ops::{Deref, DerefMut},
     sync::{
@@ -9,15 +8,14 @@ use std::{
     time::Duration,
 };
 
-use hickory_proto::op::Message;
+use hickory_proto::{op::Message, rr::rdata::opt::EdnsCode};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{Mutex, RwLock},
-    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{adapter, debug, error, info, log, option};
+use crate::{adapter, common, debug, error, info, log, option};
 
 use super::network;
 
@@ -37,7 +35,7 @@ pub(crate) struct QUICUpstream {
     //
     last_use: Arc<AtomicI64>,
     connection: Arc<RwLock<Option<QUICConnection>>>,
-    handler: Mutex<Option<JoinHandle<()>>>,
+    canceller: Mutex<Option<common::Canceller>>,
 }
 
 impl QUICUpstream {
@@ -46,7 +44,7 @@ impl QUICUpstream {
         logger: Arc<Box<dyn log::Logger>>,
         tag: String,
         options: option::QUICUpstreamOptions,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         let address = network::SocksAddr::parse_with_default_port(&options.address, 853)?;
         let dialer = Arc::new(network::Dialer::new(
             manager.clone(),
@@ -62,7 +60,7 @@ impl QUICUpstream {
         };
         let server_name = match rustls::ServerName::try_from(server_name.as_str()) {
             Ok(v) => v,
-            Err(e) => return Err(format!("invalid server-name: {}", e).into()),
+            Err(e) => return Err(anyhow::anyhow!("invalid server-name: {}", e)),
         };
         let bootstrap = if address.is_domain_addr() {
             if let Some(bootstrap_options) = options.bootstrap {
@@ -74,7 +72,7 @@ impl QUICUpstream {
             None
         };
         if address.is_domain_addr() && bootstrap.is_none() && !dialer.domain_support() {
-            return Err("domain address not supported, because dialer is unsupported, and bootstrap is not set".into());
+            return Err(anyhow::anyhow!("domain address not supported, because dialer is unsupported, and bootstrap is not set"));
         }
         tls_client_config.alpn_protocols = vec![b"doq".to_vec(), b"doq-i11".to_vec()];
         let quic_client_config = quinn::ClientConfig::new(Arc::new(tls_client_config));
@@ -93,7 +91,7 @@ impl QUICUpstream {
             dialer,
             last_use: Arc::new(AtomicI64::new(0)),
             connection: Arc::new(RwLock::new(None)),
-            handler: Mutex::new(None),
+            canceller: Mutex::new(None),
         })
     }
 
@@ -101,6 +99,7 @@ impl QUICUpstream {
         connection: Arc<RwLock<Option<QUICConnection>>>,
         last_use: Arc<AtomicI64>,
         idle_timeout: Duration,
+        canceller_guard: common::CancellerGuard,
     ) {
         loop {
             tokio::select! {
@@ -117,6 +116,9 @@ impl QUICUpstream {
                             connection.take();
                         }
                     }
+                }
+                _ = canceller_guard.cancelled() => {
+                    return;
                 }
             }
         }
@@ -135,7 +137,7 @@ impl QUICUpstream {
         }
     }
 
-    async fn get_quic_connection(&self) -> Result<QUICConnection, Box<dyn Error + Send + Sync>> {
+    async fn get_quic_connection(&self) -> anyhow::Result<QUICConnection> {
         let mut connection = self.connection.read().await.clone();
         if let Some(connection) = connection.take() {
             if !connection.is_closed() {
@@ -175,15 +177,19 @@ impl QUICUpstream {
         Ok(quic_connection)
     }
 
-    async fn exchange_wrapper(
-        &self,
-        request: &Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    async fn exchange_wrapper(&self, request: &Message) -> anyhow::Result<Message> {
+        // Check EDNS0
+        if let Some(edns0) = request.extensions() {
+            if edns0.option(EdnsCode::Keepalive).is_some() {
+                return Err(anyhow::anyhow!(
+                    "quic: EDNS0 TCP keepalive option is not supported"
+                ));
+            }
+        }
+        //
         let request_bytes = request
             .to_vec()
-            .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("serialize request failed: {}", err).into()
-            })?;
+            .map_err(|err| anyhow::anyhow!("serialize request failed: {}", err))?;
         let quic_connection = self.get_quic_connection().await?;
         let (mut sender, mut receiver) = quic_connection.open_bi().await.map_err(|e| {
             quic_connection.set_close_tag();
@@ -226,15 +232,13 @@ impl QUICUpstream {
             })?;
             Message::from_vec(&buf[..length])
         }
-        .map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-            format!("deserialize response failed: {}", err).into()
-        })
+        .map_err(|err| anyhow::anyhow!("deserialize response failed: {}", err))
     }
 }
 
 #[async_trait::async_trait]
 impl adapter::Common for QUICUpstream {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         self.dialer.start().await;
         if let Some(bootstrap) = self.bootstrap.as_ref() {
             bootstrap.start().await?;
@@ -242,15 +246,17 @@ impl adapter::Common for QUICUpstream {
         let connection = self.connection.clone();
         let last_use = self.last_use.clone();
         let idle_timeout = self.idle_timeout;
-        let handler =
-            tokio::spawn(async move { Self::handle(connection, last_use, idle_timeout).await });
-        self.handler.lock().await.replace(handler);
+        let (canceller, canceller_guard) = common::new_canceller();
+        tokio::spawn(async move {
+            Self::handle(connection, last_use, idle_timeout, canceller_guard).await
+        });
+        self.canceller.lock().await.replace(canceller);
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        if let Some(handler) = self.handler.lock().await.take() {
-            handler.abort();
+    async fn close(&self) -> anyhow::Result<()> {
+        if let Some(mut canceller) = self.canceller.lock().await.take() {
+            canceller.cancel_and_wait().await;
         }
         if let Some(connection) = self.connection.write().await.take() {
             connection.set_close_tag();
@@ -285,7 +291,7 @@ impl adapter::Upstream for QUICUpstream {
         &self,
         log_tracker: Option<&log::Tracker>,
         request: &mut Message,
-    ) -> Result<Message, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<Message> {
         let query_info = super::show_query(&request);
         info!(
             self.logger,

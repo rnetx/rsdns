@@ -14,24 +14,28 @@ pub use workflow::*;
 
 use serde::Deserialize;
 
-use crate::common;
-
+#[serde_with::serde_as]
 #[derive(Default, Debug, Clone, Deserialize)]
 pub struct Options {
     #[serde(default)]
     pub log: LogOptions,
     #[serde(default)]
     pub api: Option<APIServerOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
-    pub upstreams: common::SingleOrList<UpstreamOptions>,
+    pub upstreams: Vec<UpstreamOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
-    pub listeners: common::SingleOrList<ListenerOptions>,
+    pub listeners: Vec<ListenerOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(rename = "matcher-plugins")]
     #[serde(default)]
-    pub matcher_plugins: common::SingleOrList<PluginOptions>,
+    pub matcher_plugins: Vec<PluginOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(rename = "executor-plugins")]
     #[serde(default)]
-    pub executor_plugins: common::SingleOrList<PluginOptions>,
+    pub executor_plugins: Vec<PluginOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
-    pub workflows: common::SingleOrList<WorkflowOptions>,
+    pub workflows: Vec<WorkflowOptions>,
 }

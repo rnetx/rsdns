@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, ops::Deref, sync::Arc};
+use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use crate::{adapter, log};
 
@@ -9,7 +9,7 @@ struct MatcherPluginCreator(
                 Box<dyn log::Logger>,
                 String,
                 serde_yaml::Value,
-            ) -> Result<Box<dyn adapter::MatcherPlugin>, Box<dyn Error + Send + Sync>>
+            ) -> anyhow::Result<Box<dyn adapter::MatcherPlugin>>
             + Sync,
     >,
 );
@@ -21,7 +21,7 @@ where
             Box<dyn log::Logger>,
             String,
             serde_yaml::Value,
-        ) -> Result<Box<dyn adapter::MatcherPlugin>, Box<dyn Error + Send + Sync>>
+        ) -> anyhow::Result<Box<dyn adapter::MatcherPlugin>>
         + Sync
         + 'static,
 {
@@ -36,8 +36,7 @@ impl Deref for MatcherPluginCreator {
         Box<dyn log::Logger>,
         String,
         serde_yaml::Value,
-    )
-        -> Result<Box<dyn adapter::MatcherPlugin>, Box<dyn Error + Send + Sync>>;
+    ) -> anyhow::Result<Box<dyn adapter::MatcherPlugin>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -51,8 +50,7 @@ struct ExecutorPluginCreator(
                 Box<dyn log::Logger>,
                 String,
                 serde_yaml::Value,
-            )
-                -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>>
+            ) -> anyhow::Result<Box<dyn adapter::ExecutorPlugin>>
             + Sync,
     >,
 );
@@ -64,7 +62,7 @@ where
             Box<dyn log::Logger>,
             String,
             serde_yaml::Value,
-        ) -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>>
+        ) -> anyhow::Result<Box<dyn adapter::ExecutorPlugin>>
         + Sync
         + 'static,
 {
@@ -79,8 +77,7 @@ impl Deref for ExecutorPluginCreator {
         Box<dyn log::Logger>,
         String,
         serde_yaml::Value,
-    )
-        -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>>;
+    ) -> anyhow::Result<Box<dyn adapter::ExecutorPlugin>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -180,12 +177,11 @@ pub(crate) fn new_matcher_plugin(
     tag: String,
     r#type: String,
     options: serde_yaml::Value,
-) -> Result<Box<dyn adapter::MatcherPlugin>, Box<dyn Error + Send + Sync>> {
-    let creator = MATCHER_CREATOR
-        .get(&r#type)
-        .ok_or::<Box<dyn Error + Send + Sync>>(
-            format!("matcher-plugin type [{}] not found", r#type).into(),
-        )?;
+) -> anyhow::Result<Box<dyn adapter::MatcherPlugin>> {
+    let creator = MATCHER_CREATOR.get(&r#type).ok_or(anyhow::anyhow!(
+        "matcher-plugin type [{}] not found",
+        r#type
+    ))?;
     creator(manager, logger, tag, options)
 }
 
@@ -195,12 +191,11 @@ pub(crate) fn new_executor_plugin(
     tag: String,
     r#type: String,
     options: serde_yaml::Value,
-) -> Result<Box<dyn adapter::ExecutorPlugin>, Box<dyn Error + Send + Sync>> {
-    let creator = EXECUTOR_CREATOR
-        .get(&r#type)
-        .ok_or::<Box<dyn Error + Send + Sync>>(
-            format!("executor-plugin type [{}] not found", r#type).into(),
-        )?;
+) -> anyhow::Result<Box<dyn adapter::ExecutorPlugin>> {
+    let creator = EXECUTOR_CREATOR.get(&r#type).ok_or(anyhow::anyhow!(
+        "executor-plugin type [{}] not found",
+        r#type
+    ))?;
     creator(manager, logger, tag, options)
 }
 

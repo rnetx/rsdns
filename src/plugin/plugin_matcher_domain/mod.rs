@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use serde::Deserialize;
 use tokio::{
@@ -7,16 +7,19 @@ use tokio::{
     sync::RwLock,
 };
 
-use crate::{adapter, common, debug, log};
+use crate::{adapter, common, debug, error, log};
 
 pub(crate) const TYPE: &str = "domain";
 
+#[serde_with::serde_as]
 #[derive(Deserialize)]
 struct Options {
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
-    rule: common::SingleOrList<common::Domain>,
+    rule: Vec<common::Domain>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
-    file: common::SingleOrList<String>,
+    file: Vec<String>,
 }
 
 pub(crate) struct Domain {
@@ -33,17 +36,15 @@ impl Domain {
         logger: Box<dyn log::Logger>,
         tag: String,
         options: serde_yaml::Value,
-    ) -> Result<Box<dyn adapter::MatcherPlugin>, Box<dyn Error + Send + Sync>> {
-        let options =
-            Options::deserialize(options).map_err::<Box<dyn Error + Send + Sync>, _>(|err| {
-                format!("failed to deserialize options: {}", err).into()
-            })?;
+    ) -> anyhow::Result<Box<dyn adapter::MatcherPlugin>> {
+        let options = Options::deserialize(options)
+            .map_err(|err| anyhow::anyhow!("failed to deserialize options: {}", err))?;
         let logger = Arc::new(logger);
         if options.rule.len() > 0 && options.file.len() > 0 {
-            return Err("missing rule or file".into());
+            return Err(anyhow::anyhow!("missing rule or file"));
         }
         let inner_domain_matcher = if options.rule.len() > 0 {
-            Some(common::DomainMatcher::new(options.rule.into_list()))
+            Some(common::DomainMatcher::new(options.rule))
         } else {
             None
         };
@@ -54,7 +55,7 @@ impl Domain {
             inner_domain_matcher,
             files: Arc::new({
                 if options.file.len() > 0 {
-                    Some(options.file.into_list())
+                    Some(options.file)
                 } else {
                     None
                 }
@@ -68,15 +69,17 @@ impl Domain {
     async fn load_files<S: AsRef<str>>(
         logger: &Arc<Box<dyn log::Logger>>,
         files: &[S],
-    ) -> Result<common::DomainMatcher, Box<dyn Error + Send + Sync>> {
+    ) -> anyhow::Result<common::DomainMatcher> {
         let mut rule_map = HashMap::new();
         for file in files {
             let mut lines = match fs::File::open(file.as_ref()).await {
                 Ok(f) => io::BufReader::new(f).lines(),
                 Err(e) => {
-                    return Err(
-                        format!("failed to open file: {}, err: {}", file.as_ref(), e).into(),
-                    );
+                    return Err(anyhow::anyhow!(
+                        "failed to open file: {}, err: {}",
+                        file.as_ref(),
+                        e
+                    ));
                 }
             };
             while let Ok(Some(line)) = lines.next_line().await {
@@ -91,7 +94,7 @@ impl Domain {
                 let rule = match common::Domain::from_str(s) {
                     Ok(v) => v,
                     Err(e) => {
-                        debug!(
+                        error!(
                             logger,
                             "failed to parse domain rule: {}, file: {}, err: {}",
                             s,
@@ -110,7 +113,7 @@ impl Domain {
 
 #[async_trait::async_trait]
 impl adapter::Common for Domain {
-    async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn start(&self) -> anyhow::Result<()> {
         if let Some(files) = self.files.as_ref() {
             let domain_matcher = Self::load_files(&self.logger, files).await?;
             self.file_domain_matcher
@@ -121,7 +124,7 @@ impl adapter::Common for Domain {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn close(&self) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -136,18 +139,11 @@ impl adapter::MatcherPlugin for Domain {
         TYPE
     }
 
-    async fn prepare_workflow_args(
-        &self,
-        _: serde_yaml::Value,
-    ) -> Result<u16, Box<dyn Error + Send + Sync>> {
+    async fn prepare_workflow_args(&self, _: serde_yaml::Value) -> anyhow::Result<u16> {
         Ok(0)
     }
 
-    async fn r#match(
-        &self,
-        ctx: &mut adapter::Context,
-        _: u16,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    async fn r#match(&self, ctx: &mut adapter::Context, _: u16) -> anyhow::Result<bool> {
         let domain = ctx.request().query().unwrap().name().to_string();
         let domain = domain.trim_end_matches('.');
         let inner_domain_matcher = &self.inner_domain_matcher;

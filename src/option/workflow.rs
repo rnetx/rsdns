@@ -4,10 +4,12 @@ use serde::Deserialize;
 
 use crate::common;
 
+#[serde_with::serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct WorkflowOptions {
     pub tag: String,
-    pub rules: common::SingleOrList<WorkflowRuleOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
+    pub rules: Vec<WorkflowRuleOptions>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,31 +79,41 @@ impl<'de> serde::Deserialize<'de> for WorkflowRuleOptions {
     }
 }
 
+#[serde_with::serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct MatchAndRuleOptions {
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(rename = "match-and")]
-    pub match_and: common::SingleOrList<MatchItemRuleOptions>,
+    pub match_and: Vec<MatchItemRuleOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
-    pub exec: common::SingleOrList<ExecItemRuleOptions>,
+    pub exec: Vec<ExecItemRuleOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
     #[serde(rename = "else-exec")]
-    pub else_exec: common::SingleOrList<ExecItemRuleOptions>,
+    pub else_exec: Vec<ExecItemRuleOptions>,
 }
 
+#[serde_with::serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct MatchOrRuleOptions {
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(rename = "match-or")]
-    pub match_or: common::SingleOrList<MatchItemRuleOptions>,
+    pub match_or: Vec<MatchItemRuleOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
-    pub exec: common::SingleOrList<ExecItemRuleOptions>,
+    pub exec: Vec<ExecItemRuleOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
     #[serde(default)]
     #[serde(rename = "else-exec")]
-    pub else_exec: common::SingleOrList<ExecItemRuleOptions>,
+    pub else_exec: Vec<ExecItemRuleOptions>,
 }
 
+#[serde_with::serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExecRuleOptions {
-    pub exec: common::SingleOrList<ExecItemRuleOptions>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
+    pub exec: Vec<ExecItemRuleOptions>,
 }
 
 #[derive(Debug, Clone)]

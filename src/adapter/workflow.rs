@@ -1,4 +1,4 @@
-use std::{error::Error, fmt};
+use std::fmt;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReturnMode {
@@ -30,9 +30,6 @@ impl fmt::Display for ReturnMode {
 #[async_trait::async_trait]
 pub(crate) trait Workflow: Send + Sync {
     fn tag(&self) -> &str;
-    async fn check(&self) -> Result<(), Box<dyn Error + Send + Sync>>;
-    async fn execute(
-        &self,
-        ctx: &mut super::Context,
-    ) -> Result<ReturnMode, Box<dyn Error + Send + Sync>>;
+    async fn check(&self) -> anyhow::Result<()>;
+    async fn execute(&self, ctx: &mut super::Context) -> anyhow::Result<ReturnMode>;
 }
