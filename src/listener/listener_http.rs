@@ -317,18 +317,23 @@ impl HTTPListener {
             tokio::select! {
                 res = h3_connection.accept() => {
                     match res {
-                        Ok(Some((req, req_stream))) => {
+                        Ok(Some((req, mut req_stream))) => {
                             let service = service.clone();
                             let peer_addr = peer_addr.clone();
                             let canceller_guard = canceller_guard.clone();
                             join_set.spawn(async move {
-                                Self::http3_request_handle(service, peer_addr, req, req_stream, canceller_guard).await;
+                                tokio::select! {
+                                    _ = service.http3_call(peer_addr, req, &mut req_stream) => {}
+                                    _ = canceller_guard.cancelled() => {}
+                                }
                             });
                             while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
                         }
-                        Ok(None) => {}
-                        Err(e) => {
-                            error!(service.logger(), "failed to accept HTTP3 stream: {}, peer_addr: {}", e, peer_addr);
+                        Ok(None) => {
+                            while join_set.join_next().await.is_some() {}
+                            break;
+                        }
+                        Err(_) => {
                             break;
                         }
                     }
@@ -339,25 +344,6 @@ impl HTTPListener {
             }
         }
         join_set.shutdown().await;
-    }
-
-    // HTTP3: stream handle
-    #[cfg(all(
-        feature = "listener-https",
-        feature = "listener-quic",
-        feature = "listener-tls"
-    ))]
-    async fn http3_request_handle(
-        service: Arc<HTTPService>,
-        peer_addr: SocketAddr,
-        req: http::Request<()>,
-        mut req_stream: h3::server::RequestStream<h3_quinn::BidiStream<bytes::Bytes>, bytes::Bytes>,
-        canceller_guard: common::CancellerGuard,
-    ) {
-        tokio::select! {
-            _ = service.http3_call(peer_addr, req, &mut req_stream) => {}
-            _ = canceller_guard.cancelled() => {}
-        }
     }
 }
 

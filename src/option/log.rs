@@ -13,5 +13,8 @@ pub struct LogOptions {
     #[serde(rename = "disable-timestamp")]
     pub disable_timestamp: bool,
     #[serde(default)]
+    #[serde(rename = "disable-color")]
+    pub disable_color: bool,
+    #[serde(default)]
     pub output: String,
 }

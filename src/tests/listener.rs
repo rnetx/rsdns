@@ -142,7 +142,11 @@ where
         let domain_str = domain.to_string();
         join_set.spawn(async move {
             let result = fut.await;
-            println!("{}: {}", domain_str, result.is_ok());
+            let check = match result.ok() {
+                Some(m) => !m.answers().is_empty(),
+                None => false,
+            };
+            println!("{}: {}", domain_str, check);
         });
         while futures_util::FutureExt::now_or_never(join_set.join_next())
             .flatten()

@@ -12,15 +12,17 @@ pub(super) async fn handle(
     peer_addr: IpAddr,
     request: Message,
 ) -> Option<Message> {
-    if request.query().is_none() {
-        error!(
-            logger,
-            "invalid request message failed: no query found, peer_addr: {}", peer_addr,
-        );
-        return None;
-    }
-    let request_info = upstream::show_query(&request);
-    let mut ctx = adapter::Context::new(request, listener_tag, peer_addr.clone());
+    let mut ctx = match adapter::Context::new(request, listener_tag, peer_addr.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(
+                logger,
+                "invalid request message failed: {}, peer_addr: {}", e, peer_addr,
+            );
+            return None;
+        }
+    };
+    let request_info = upstream::show_query(ctx.request());
     info!(
         logger,
         { tracker = ctx.log_tracker() },

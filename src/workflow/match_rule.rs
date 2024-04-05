@@ -209,10 +209,7 @@ impl MatchItemInnerRule {
                 Ok(res)
             }
             MatchItemInnerRule::QType(map) => {
-                let query = ctx
-                    .request()
-                    .query()
-                    .ok_or(anyhow::anyhow!("no query found"))?;
+                let query = ctx.request_query();
                 let qtype = query.query_type();
                 let res = map.contains_key(&qtype);
                 if res {
@@ -233,10 +230,7 @@ impl MatchItemInnerRule {
                 Ok(res)
             }
             MatchItemInnerRule::QName(map) => {
-                let query = ctx
-                    .request()
-                    .query()
-                    .ok_or(anyhow::anyhow!("no query found"))?;
+                let query = ctx.request_query();
                 let qname = query.name();
                 let res = map.contains_key(&qname);
                 if res {

@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
     hash::Hash,
-    rc::Rc,
+    rc::{Rc, Weak},
     sync::Arc,
 };
 
@@ -10,8 +10,8 @@ use crate::adapter;
 
 struct GraphNode<T: Eq + Hash> {
     data: T,
-    prev: RefCell<HashMap<T, Rc<Self>>>,
-    next: RefCell<HashMap<T, Rc<Self>>>,
+    prev: RefCell<HashMap<T, Weak<Self>>>,
+    next: RefCell<HashMap<T, Weak<Self>>>,
 }
 
 impl<T: Clone + Eq + Hash> GraphNode<T> {
@@ -28,11 +28,11 @@ impl<T: Clone + Eq + Hash> GraphNode<T> {
     }
 
     fn add_prev(&self, node: Rc<Self>) {
-        self.prev.borrow_mut().insert(node.data().clone(), node);
+        self.prev.borrow_mut().insert(node.data().clone(), Rc::downgrade(&node));
     }
 
     fn add_next(&self, node: Rc<Self>) {
-        self.next.borrow_mut().insert(node.data().clone(), node);
+        self.next.borrow_mut().insert(node.data().clone(), Rc::downgrade(&node));
     }
 
     fn remove_prev(&self, data_ref: &T) {

@@ -4,7 +4,7 @@ use rand::Rng;
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use crate::{adapter, common, debug, log};
+use crate::{adapter, debug, log};
 
 pub(crate) const TYPE: &str = "maxminddb";
 
@@ -33,11 +33,13 @@ pub(crate) struct MaxmindDB {
     reader: Arc<RwLock<Option<maxminddb::Reader<Vec<u8>>>>>,
 }
 
+#[serde_with::serde_as]
 #[derive(Deserialize, Clone)]
 struct WorkflowArgs {
     #[serde(default)]
     mode: WorkflowMode,
-    tag: common::SingleOrList<String>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
+    tag: Vec<String>,
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -171,7 +173,7 @@ impl adapter::MatcherPlugin for MaxmindDB {
         let mut args = WorkflowArgs::deserialize(args)
             .map_err(|err| anyhow::anyhow!("failed to deserialize args: {}", err))?;
         let mut new_tags = Vec::with_capacity(args.tag.len());
-        for tag in args.tag.into_list().into_iter() {
+        for tag in args.tag {
             if !tag.contains(',') {
                 new_tags.push(tag);
             } else {

@@ -59,9 +59,16 @@ impl Manager {
         let root_logger = Arc::new(if options.log.disabled {
             log::NopLogger.into_box()
         } else {
+            let mut color_enabled = false;
             let output = match options.log.output.as_str() {
-                "" | "stdout" => Box::new(io::stdout()) as Box<dyn io::Write + Send + Sync>,
-                "stderr" => Box::new(io::stderr()) as Box<dyn io::Write + Send + Sync>,
+                "" | "stdout" => {
+                    color_enabled = true;
+                    Box::new(io::stdout()) as Box<dyn io::Write + Send + Sync>
+                }
+                "stderr" => {
+                    color_enabled = true;
+                    Box::new(io::stderr()) as Box<dyn io::Write + Send + Sync>
+                }
                 _ => {
                     let f = fs::OpenOptions::new()
                         .create(true)
@@ -71,12 +78,22 @@ impl Manager {
                     Box::new(f) as Box<dyn io::Write + Send + Sync>
                 }
             };
-            log::BasicLogger::new(options.log.disable_timestamp, options.log.level, output)
-                .into_box()
+            if options.log.disable_color {
+                color_enabled = false;
+            }
+            log::BasicLogger::new(
+                options.log.disable_timestamp,
+                options.log.level,
+                color_enabled,
+                output,
+            )
+            .into_box()
         });
         let manager = Self {
             manager_logger: Arc::new(
-                log::TagLogger::new(root_logger.clone(), "manager".to_owned()).into_box(),
+                log::TagLogger::new(root_logger.clone(), "manager".to_owned())
+                    .with_color(colored::Color::BrightRed)
+                    .into_box(),
             ),
             upstreams: Arc::new(RwLock::new((Vec::new(), HashMap::new()))),
             matcher_plugins: Arc::new(RwLock::new((Vec::new(), HashMap::new()))),
@@ -114,7 +131,8 @@ impl Manager {
                     ));
                 }
                 let tag = o.tag.clone();
-                let logger = log::TagLogger::new(root_logger.clone(), format!("upstream/{}", tag));
+                let logger = log::TagLogger::new(root_logger.clone(), format!("upstream/{}", tag))
+                    .with_color(colored::Color::BrightGreen);
                 let u = Arc::new(
                     upstream::new_upstream(
                         manager.clone_abstract_arc_box(),
@@ -159,7 +177,8 @@ impl Manager {
                     ));
                 }
                 let logger =
-                    log::TagLogger::new(root_logger.clone(), format!("matcher-plugin/{}", tag));
+                    log::TagLogger::new(root_logger.clone(), format!("matcher-plugin/{}", tag))
+                        .with_color(colored::Color::BrightBlue);
                 let p = Arc::new(
                     plugin::new_matcher_plugin(
                         manager.clone_abstract_arc_box(),
@@ -208,7 +227,8 @@ impl Manager {
                     ));
                 }
                 let logger =
-                    log::TagLogger::new(root_logger.clone(), format!("executor-plugin/{}", tag));
+                    log::TagLogger::new(root_logger.clone(), format!("executor-plugin/{}", tag))
+                        .with_color(colored::Color::BrightBlue);
                 let p = Arc::new(
                     plugin::new_executor_plugin(
                         manager.clone_abstract_arc_box(),
@@ -252,7 +272,8 @@ impl Manager {
                     ));
                 }
                 let tag = o.tag.clone();
-                let logger = log::TagLogger::new(root_logger.clone(), format!("workflow/{}", tag));
+                let logger = log::TagLogger::new(root_logger.clone(), format!("workflow/{}", tag))
+                    .with_color(colored::Color::BrightMagenta);
                 let w = Arc::new(
                     workflow::Workflow::new(
                         manager.clone_abstract_arc_box(),
@@ -285,7 +306,8 @@ impl Manager {
                     ));
                 }
                 let tag = o.tag.clone();
-                let logger = log::TagLogger::new(root_logger.clone(), format!("listener/{}", tag));
+                let logger = log::TagLogger::new(root_logger.clone(), format!("listener/{}", tag))
+                    .with_color(colored::Color::BrightYellow);
                 let li = Arc::new(
                     listener::new_listener(
                         manager.clone_abstract_arc_box(),
@@ -306,7 +328,8 @@ impl Manager {
         {
             // API Server
             if let Some(api_options) = options.api {
-                let logger = log::TagLogger::new(root_logger.clone(), format!("api-server"));
+                let logger = log::TagLogger::new(root_logger.clone(), format!("api-server"))
+                    .with_color(colored::Color::BrightCyan);
                 let api_server = super::APIServer::new(
                     manager.clone_abstract_arc_box(),
                     logger.into_box(),

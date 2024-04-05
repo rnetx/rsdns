@@ -129,6 +129,8 @@ impl QUICListener {
                     Self::stream_handle(workflow, logger, query_timeout, listener_tag, disable_prefix, send_stream, recv_stream, peer_addr, canceller_guard).await;
                   });
                   while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
+                } else {
+                    break;
                 }
               }
               _ = canceller_guard.cancelled() => {

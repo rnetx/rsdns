@@ -1,6 +1,6 @@
 use std::{collections::HashMap, net::IpAddr, sync::Arc};
 
-use hickory_proto::op::Message;
+use hickory_proto::op::{Message, Query};
 
 use crate::log;
 
@@ -9,6 +9,7 @@ pub(crate) struct Context {
     log_tracker: Arc<log::Tracker>,
     listener: String,
     client_ip: IpAddr,
+    request_query: Query,
     request: Message,
     response: Option<Message>,
     mark: i16,
@@ -16,16 +17,26 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    pub(crate) fn new(request: Message, listener: String, client_ip: IpAddr) -> Self {
-        Self {
+    pub(crate) fn new(
+        request: Message,
+        listener: String,
+        client_ip: IpAddr,
+    ) -> anyhow::Result<Self> {
+        let request_query = if let Some(query) = request.query() {
+            query.clone()
+        } else {
+            return Err(anyhow::anyhow!("missing query"));
+        };
+        Ok(Self {
             log_tracker: Arc::new(log::Tracker::default()),
             listener,
             client_ip,
+            request_query,
             request,
             response: None,
             mark: 0,
             metadata: HashMap::new(),
-        }
+        })
     }
 
     pub(crate) fn log_tracker(&self) -> &Arc<log::Tracker> {
@@ -34,6 +45,10 @@ impl Context {
 
     pub(crate) fn client_ip(&self) -> &IpAddr {
         &self.client_ip
+    }
+
+    pub(crate) fn request_query(&self) -> &Query {
+        &self.request_query
     }
 
     pub(crate) fn request(&self) -> &Message {

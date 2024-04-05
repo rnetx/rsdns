@@ -3,6 +3,8 @@ use std::fmt;
 pub(crate) trait Logger: Send + Sync {
     fn enabled(&self, level: super::Level) -> bool;
 
+    fn color_enabled(&self) -> bool;
+
     fn log(&self, level: super::Level, message: fmt::Arguments<'_>);
 
     fn log_with_tracker(

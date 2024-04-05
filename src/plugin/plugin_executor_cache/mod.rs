@@ -156,7 +156,7 @@ impl adapter::ExecutorPlugin for Cache {
                         match &self.cache {
                             CacheWrapper::Memory(c) => {
                                 c.store_response(
-                                    ctx.request().query().cloned().unwrap(),
+                                    ctx.request_query().clone(),
                                     response,
                                     expired_duration,
                                 )
@@ -167,7 +167,7 @@ impl adapter::ExecutorPlugin for Cache {
                             CacheWrapper::Redis(c) => {
                                 if let Err(e) = c
                                     .store_response(
-                                        ctx.request().query().cloned().unwrap(),
+                                        ctx.request_query().clone(),
                                         response,
                                         expired_duration,
                                     )
@@ -198,23 +198,11 @@ impl adapter::ExecutorPlugin for Cache {
                 }
             }
             WorkflowArgs::Restore { disable_return_all } => {
-                let query = match ctx.request().query() {
-                    Some(v) => v,
-                    None => {
-                        debug!(
-                            self.logger,
-                            { tracker = ctx.log_tracker() },
-                            "query not found, skip restore from cache"
-                        );
-                        return Ok(adapter::ReturnMode::Continue);
-                    }
-                };
-
                 let response = match &self.cache {
-                    CacheWrapper::Memory(c) => c.restore_response(query).await,
+                    CacheWrapper::Memory(c) => c.restore_response(ctx.request_query()).await,
 
                     #[cfg(feature = "plugin-executor-cache-redis")]
-                    CacheWrapper::Redis(c) => match c.restore_response(query).await {
+                    CacheWrapper::Redis(c) => match c.restore_response(ctx.request_query()).await {
                         Ok(v) => v,
                         Err(e) => {
                             crate::error!(

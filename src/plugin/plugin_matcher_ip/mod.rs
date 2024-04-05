@@ -12,12 +12,15 @@ use crate::{adapter, common, debug, error, log};
 
 pub(crate) const TYPE: &str = "ip";
 
+#[serde_with::serde_as]
 #[derive(Deserialize)]
 struct Options {
     #[serde(default)]
-    rule: common::SingleOrList<String>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
+    rule: Vec<String>,
     #[serde(default)]
-    file: common::SingleOrList<String>,
+    #[serde_as(deserialize_as = "serde_with::OneOrMany<_>")]
+    file: Vec<String>,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -64,7 +67,7 @@ impl IP {
         }
         let inner_rule_reader = if options.rule.len() > 0 {
             let mut ip_map = HashMap::with_capacity(options.rule.len());
-            for ip in options.rule.into_list() {
+            for ip in options.rule {
                 match ip.parse::<common::IPRange>() {
                     Ok(v) => {
                         ip_map.insert(v, ());
@@ -89,7 +92,7 @@ impl IP {
             inner_rule_reader,
             files: Arc::new({
                 if options.file.len() > 0 {
-                    Some(options.file.into_list())
+                    Some(options.file)
                 } else {
                     None
                 }

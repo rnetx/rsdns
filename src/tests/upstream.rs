@@ -113,7 +113,11 @@ async fn test_message(upstream: &Arc<Box<dyn adapter::Upstream>>) {
         tokio::time::sleep(Duration::from_millis(100)).await;
         join_set.spawn(async move {
             let result = upstream.exchange(None, &mut message).await;
-            println!("{}: {}", message.query().unwrap().name(), result.is_ok());
+            let check = match result.ok() {
+                Some(m) => !m.answers().is_empty(),
+                None => false,
+            };
+            println!("{}: {}", message.query().unwrap().name(), check);
         });
     }
     let mut i = 0;
@@ -127,7 +131,7 @@ async fn test_message(upstream: &Arc<Box<dyn adapter::Upstream>>) {
 async fn test_upstream(options: option::UpstreamOptions) {
     let manager = Box::new(NopManager::default());
     let basic_logger =
-        log::BasicLogger::new(false, log::Level::Debug, Box::new(io::stdout())).into_box();
+        log::BasicLogger::new(false, log::Level::Debug, false, Box::new(io::stdout())).into_box();
     let tag = options.tag.clone();
     let u = upstream::new_upstream(Arc::new(manager), basic_logger, tag, options)
         .map(|u| Arc::new(u))

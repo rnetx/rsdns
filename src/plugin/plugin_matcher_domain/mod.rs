@@ -144,7 +144,7 @@ impl adapter::MatcherPlugin for Domain {
     }
 
     async fn r#match(&self, ctx: &mut adapter::Context, _: u16) -> anyhow::Result<bool> {
-        let domain = ctx.request().query().unwrap().name().to_string();
+        let domain = ctx.request_query().name().to_string();
         let domain = domain.trim_end_matches('.');
         let inner_domain_matcher = &self.inner_domain_matcher;
         let file_domain_matcher = self.file_domain_matcher.read().await;

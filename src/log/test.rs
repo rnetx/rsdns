@@ -3,7 +3,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
-use hickory_proto::op::Message;
+use hickory_proto::op::{Message, Query};
 
 use crate::fatal;
 
@@ -11,14 +11,20 @@ use super::*;
 
 #[test]
 fn test_macro() {
-    let basic = BasicLogger::new(false, super::Level::Info, Box::new(io::stdout())).into_box();
+    let basic =
+        BasicLogger::new(false, super::Level::Info, false, Box::new(io::stdout())).into_box();
 
     let tracker = super::Tracker::default();
     let ctx = crate::adapter::Context::new(
-        Message::new(),
+        {
+            let mut msg = Message::new();
+            msg.add_query(Query::new());
+            msg
+        },
         "".to_owned(),
         IpAddr::V4(Ipv4Addr::LOCALHOST),
-    );
+    )
+    .unwrap();
     let ctx_ref = Some(&ctx);
     fatal!(basic, "test");
     fatal!(basic, tracker, "test");

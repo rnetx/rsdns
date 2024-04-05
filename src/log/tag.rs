@@ -1,13 +1,27 @@
 use std::sync::Arc;
 
+use colored::Colorize;
+
 pub(crate) struct TagLogger {
     inner: Arc<Box<dyn super::Logger>>,
     tag: String,
+    color: Option<colored::Color>,
 }
 
 impl TagLogger {
     pub(crate) fn new(inner: Arc<Box<dyn super::Logger>>, tag: String) -> Self {
-        Self { inner, tag }
+        Self {
+            inner,
+            tag,
+            color: None,
+        }
+    }
+
+    pub(crate) fn with_color(self, color: colored::Color) -> Self {
+        Self {
+            color: Some(color),
+            ..self
+        }
     }
 
     pub(crate) fn into_box(self) -> Box<dyn super::Logger> {
@@ -20,6 +34,10 @@ impl super::Logger for TagLogger {
         self.inner.enabled(level)
     }
 
+    fn color_enabled(&self) -> bool {
+        self.inner.color_enabled()
+    }
+
     fn log(&self, level: super::Level, message: std::fmt::Arguments<'_>) {
         if !self.enabled(level) {
             return;
@@ -27,7 +45,16 @@ impl super::Logger for TagLogger {
 
         self.inner.log(
             level,
-            format_args!("[{}] {}", self.tag, message.to_string().trim_end()),
+            format_args!(
+                "[{}] {}",
+                if self.inner.color_enabled() && self.color.is_some() {
+                    let color = self.color.clone().unwrap();
+                    self.tag.color(color).to_string()
+                } else {
+                    self.tag.to_string()
+                },
+                message.to_string().trim_end()
+            ),
         );
     }
 
@@ -44,7 +71,16 @@ impl super::Logger for TagLogger {
         self.inner.log_with_tracker(
             level,
             tracker,
-            format_args!("[{}] {}", self.tag, message.to_string().trim_end()),
+            format_args!(
+                "[{}] {}",
+                if self.inner.color_enabled() && self.color.is_some() {
+                    let color = self.color.clone().unwrap();
+                    self.tag.color(color).to_string()
+                } else {
+                    self.tag.to_string()
+                },
+                message.to_string().trim_end()
+            ),
         );
     }
 }

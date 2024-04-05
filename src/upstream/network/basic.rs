@@ -14,6 +14,8 @@ pub(super) struct BasicDialer {
     bind_ipv6: Option<Ipv6Addr>,
     bind_interface: Option<String>,
     tcp_fast_open: bool,
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     so_mark: Option<u32>,
 
     #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]
@@ -31,6 +33,8 @@ impl BasicDialer {
             bind_ipv6: options.bind_ipv6,
             bind_interface: options.bind_interface,
             tcp_fast_open: options.tcp_fast_open,
+
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             so_mark: options.so_mark,
 
             #[cfg(all(feature = "upstream-quic", feature = "upstream-tls"))]

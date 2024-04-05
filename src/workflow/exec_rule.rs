@@ -12,7 +12,7 @@ use hickory_proto::{
 };
 use tokio::sync::RwLock;
 
-use crate::{adapter, common, debug, error, log, option};
+use crate::{adapter, common, error, log, option};
 
 pub(super) enum ExecItemRule {
     Mark(i16),
@@ -125,23 +125,21 @@ impl ExecItemRule {
                 }
             }
             ExecItemRule::SetRespIP(list) => {
-                let qname = ctx.request().query().map(|q| q.name().clone());
-                if let Some(qname) = qname {
-                    if let Some(response) = ctx.response_mut() {
-                        for ip in list {
-                            match ip {
-                                IpAddr::V4(ip) => {
-                                    let mut answer =
-                                        Record::with(qname.clone(), RecordType::A, 30 * 60);
-                                    answer.set_data(Some(RData::A(ip.clone().into())));
-                                    response.add_answer(answer);
-                                }
-                                IpAddr::V6(ip) => {
-                                    let mut answer =
-                                        Record::with(qname.clone(), RecordType::AAAA, 30 * 60);
-                                    answer.set_data(Some(RData::AAAA(ip.clone().into())));
-                                    response.add_answer(answer);
-                                }
+                let qname = ctx.request_query().name().clone();
+                if let Some(response) = ctx.response_mut() {
+                    for ip in list {
+                        match ip {
+                            IpAddr::V4(ip) => {
+                                let mut answer =
+                                    Record::with(qname.clone(), RecordType::A, 30 * 60);
+                                answer.set_data(Some(RData::A(ip.clone().into())));
+                                response.add_answer(answer);
+                            }
+                            IpAddr::V6(ip) => {
+                                let mut answer =
+                                    Record::with(qname.clone(), RecordType::AAAA, 30 * 60);
+                                answer.set_data(Some(RData::AAAA(ip.clone().into())));
+                                response.add_answer(answer);
                             }
                         }
                     }
@@ -229,32 +227,23 @@ impl ExecItemRule {
                 Return::Once => return Ok(adapter::ReturnMode::ReturnOnce),
                 _ => {
                     ctx.take_response();
-                    let request = ctx.request();
-                    if request.query().is_some() {
-                        let mut response = common::generate_empty_message(request);
-                        match r {
-                            Return::Success => {
-                                response.set_response_code(ResponseCode::NoError);
-                            }
-                            Return::Failure => {
-                                response.set_response_code(ResponseCode::ServFail);
-                            }
-                            Return::NxDomain => {
-                                response.set_response_code(ResponseCode::NXDomain);
-                            }
-                            Return::Refused => {
-                                response.set_response_code(ResponseCode::Refused);
-                            }
-                            _ => unreachable!(),
+                    let mut response = common::generate_empty_message(ctx.request());
+                    match r {
+                        Return::Success => {
+                            response.set_response_code(ResponseCode::NoError);
                         }
-                        ctx.replace_response(response);
-                    } else {
-                        debug!(
-                            logger,
-                            { tracker = ctx.log_tracker() },
-                            "query not found, skip"
-                        );
+                        Return::Failure => {
+                            response.set_response_code(ResponseCode::ServFail);
+                        }
+                        Return::NxDomain => {
+                            response.set_response_code(ResponseCode::NXDomain);
+                        }
+                        Return::Refused => {
+                            response.set_response_code(ResponseCode::Refused);
+                        }
+                        _ => unreachable!(),
                     }
+                    ctx.replace_response(response);
                     return Ok(adapter::ReturnMode::ReturnAll);
                 }
             },

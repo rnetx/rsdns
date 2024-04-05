@@ -14,6 +14,10 @@ impl super::Logger for NopLogger {
         false
     }
 
+    fn color_enabled(&self) -> bool {
+        false
+    }
+
     fn log(&self, _level: super::Level, _message: fmt::Arguments<'_>) {}
 
     fn log_with_tracker(

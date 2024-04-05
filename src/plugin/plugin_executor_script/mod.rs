@@ -11,11 +11,13 @@ use crate::{adapter, common, error, log};
 
 pub(crate) const TYPE: &str = "script";
 
+#[serde_with::serde_as]
 #[derive(Deserialize)]
 struct Options {
     command: String,
     #[serde(default)]
-    args: Option<common::SingleOrList<String>>,
+    #[serde_as(deserialize_as = "Option<serde_with::OneOrMany<_>>")]
+    args: Option<Vec<String>>,
     #[serde(default)]
     env: Option<HashMap<String, String>>,
     #[serde(deserialize_with = "common::deserialize_with_option_from_str")]
@@ -51,7 +53,7 @@ impl Script {
             tag,
             logger,
             command: options.command,
-            args: options.args.map(|v| v.into_list()),
+            args: options.args,
             env: options.env,
             stdout_level: options.stdout_level,
             stderr_level: options.stderr_level,
