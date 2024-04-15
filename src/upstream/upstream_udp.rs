@@ -82,9 +82,15 @@ impl UDPUpstream {
             &self.logger,
             self.address.clone(),
             &self.bootstrap,
-            self.dialer.clone(),
-            |address, dialer| async move { dialer.new_tcp_stream(address).await },
-            |ips, port, dialer| async move { dialer.parallel_new_tcp_stream(ips, port).await },
+            &self.dialer,
+            |address, dialer| {
+                let dialer = (*dialer).clone();
+                async move { dialer.new_tcp_stream(address).await }
+            },
+            |ips, port, dialer| {
+                let dialer = (*dialer).clone();
+                async move { dialer.parallel_new_tcp_stream(ips, port).await }
+            },
         )
         .await
     }
@@ -94,9 +100,15 @@ impl UDPUpstream {
             &self.logger,
             self.address.clone(),
             &self.bootstrap,
-            self.dialer.clone(),
-            |address, dialer| async move { dialer.new_udp_socket(&address).await },
-            |ips, port, dialer| async move { dialer.parallel_new_udp_socket(ips, port).await },
+            &self.dialer,
+            |address, dialer| {
+                let dialer = (*dialer).clone();
+                async move { dialer.new_udp_socket(&address).await }
+            },
+            |ips, port, dialer| {
+                let dialer = (*dialer).clone();
+                async move { dialer.parallel_new_udp_socket(ips, port).await }
+            },
         )
         .await
     }

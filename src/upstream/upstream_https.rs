@@ -482,9 +482,15 @@ impl HTTPSConnector {
             &self.logger,
             self.address.clone(),
             &self.bootstrap,
-            self.dialer.clone(),
-            |address, dialer| async move { dialer.new_tcp_stream(address).await },
-            |ips, port, dialer| async move { dialer.parallel_new_tcp_stream(ips, port).await },
+            &self.dialer,
+            |address, dialer| {
+                let dialer = (*dialer).clone();
+                async move { dialer.new_tcp_stream(address).await }
+            },
+            |ips, port, dialer| {
+                let dialer = (*dialer).clone();
+                async move { dialer.parallel_new_tcp_stream(ips, port).await }
+            },
         )
         .await
     }
@@ -842,19 +848,34 @@ mod http3 {
                 self.address.clone(),
                 &self.bootstrap,
                 (
-                    self.dialer.clone(),
-                    self.quic_client_config.clone(),
+                    &self.dialer,
+                    &self.quic_client_config,
                     self.get_server_name_str(),
                 ),
-                |address, (dialer, quic_client_config, server_name)| async move {
-                    dialer
-                        .new_quic_connection(address, quic_client_config, &server_name)
-                        .await
+                |address, (dialer, quic_client_config, server_name)| {
+                    let dialer = (*dialer).clone();
+                    let quic_client_config = (*quic_client_config).clone();
+                    let server_name = server_name.clone();
+                    async move {
+                        dialer
+                            .new_quic_connection(address, quic_client_config, &server_name)
+                            .await
+                    }
                 },
-                |ips, port, (dialer, quic_client_config, server_name)| async move {
-                    dialer
-                        .parallel_new_quic_connection(ips, port, quic_client_config, &server_name)
-                        .await
+                |ips, port, (dialer, quic_client_config, server_name)| {
+                    let dialer = (*dialer).clone();
+                    let quic_client_config = (*quic_client_config).clone();
+                    let server_name = server_name.clone();
+                    async move {
+                        dialer
+                            .parallel_new_quic_connection(
+                                ips,
+                                port,
+                                quic_client_config,
+                                &server_name,
+                            )
+                            .await
+                    }
                 },
             )
             .await?;

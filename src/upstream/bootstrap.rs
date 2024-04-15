@@ -193,7 +193,7 @@ impl Bootstrap {
 }
 
 impl Bootstrap {
-    pub(crate) async fn dial_with_bootstrap<T, P, F1, F2, Fut1, Fut2>(
+    pub(crate) async fn dial_with_bootstrap<'p, T, P, F1, F2, Fut1, Fut2>(
         logger: &Box<dyn log::Logger>,
         address: super::network::SocksAddr,
         bootstrap: &Option<Self>,
@@ -202,8 +202,9 @@ impl Bootstrap {
         need_fn: F2,
     ) -> io::Result<T>
     where
-        F1: Fn(super::network::SocksAddr, P) -> Fut1,
-        F2: Fn(Vec<IpAddr>, u16, P) -> Fut2,
+        P: 'p,
+        F1: Fn(super::network::SocksAddr, &P) -> Fut1,
+        F2: Fn(Vec<IpAddr>, u16, &P) -> Fut2,
         Fut1: Future<Output = io::Result<T>>,
         Fut2: Future<Output = io::Result<T>>,
     {
@@ -218,9 +219,9 @@ impl Bootstrap {
                 )
             })?;
             debug!(logger, "lookup {} success: {:?}", domain, ips);
-            need_fn(ips, port, call_params).await
+            need_fn(ips, port, &call_params).await
         } else {
-            no_need_fn(address, call_params).await
+            no_need_fn(address, &call_params).await
         }
     }
 }
