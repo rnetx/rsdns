@@ -22,7 +22,7 @@ enum HTTPListenerType {
         feature = "listener-quic",
         feature = "listener-tls"
     ))]
-    HTTP3(Arc<tokio_rustls::rustls::ServerConfig>),
+    HTTP3(Arc<tokio_rustls::rustls::ServerConfig>, bool),
 }
 
 pub(crate) struct HTTPListener {
@@ -57,7 +57,7 @@ impl HTTPListener {
                         Some(tls_options) => {
                             let mut tls_config = super::new_tls_config(tls_options)?;
                             tls_config.alpn_protocols = vec![b"h3".into(), b"dns".into()];
-                            _listener_type = Some(HTTPListenerType::HTTP3(Arc::new(tls_config)));
+                            _listener_type = Some(HTTPListenerType::HTTP3(Arc::new(tls_config), options.zero_rtt));
                         }
                         None => {
                             return Err(anyhow::anyhow!("missing tls options"));
@@ -239,6 +239,7 @@ impl HTTPListener {
         service: Arc<HTTPService>,
         listener_tag: String,
         endpoint: quinn::Endpoint,
+        zero_rtt: bool,
         canceller_guard: common::CancellerGuard,
     ) {
         let mut join_set = JoinSet::new();
@@ -250,17 +251,38 @@ impl HTTPListener {
                         let service = service.clone();
                         let canceller_guard = canceller_guard.clone();
                         join_set.spawn(async move {
-                            let conn = tokio::select! {
-                                res = c => {
-                                    match res {
-                                        Ok(c) => c,
-                                        Err(_) => {
-                                            return;
+                            let conn = if zero_rtt {
+                                match c.into_0rtt() {
+                                    Ok((conn, _)) => conn,
+                                    Err(c) => {
+                                        tokio::select! {
+                                            res = c => {
+                                                match res {
+                                                    Ok(c) => c,
+                                                    Err(_) => {
+                                                        return;
+                                                    }
+                                                }
+                                            }
+                                            _ = canceller_guard.cancelled() => {
+                                                return;
+                                            }
                                         }
                                     }
                                 }
-                                _ = canceller_guard.cancelled() => {
-                                    return;
+                            } else {
+                                tokio::select! {
+                                    res = c => {
+                                        match res {
+                                            Ok(c) => c,
+                                            Err(_) => {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    _ = canceller_guard.cancelled() => {
+                                        return;
+                                    }
                                 }
                             };
                             Self::http3_conn_handle(service, conn, canceller_guard).await;
@@ -401,7 +423,7 @@ impl adapter::Common for HTTPListener {
                 feature = "listener-quic",
                 feature = "listener-tls"
             ))]
-            HTTPListenerType::HTTP3(tls_config) => {
+            HTTPListenerType::HTTP3(tls_config, zero_rtt) => {
                 let udp_socket = std::net::UdpSocket::bind(&self.listen)?;
                 let quic_server_config = quinn_proto::ServerConfig::with_crypto(tls_config.clone());
                 let quic_endpoint = quinn::Endpoint::new(
@@ -416,6 +438,7 @@ impl adapter::Common for HTTPListener {
                     service,
                     listener_tag,
                     quic_endpoint,
+                    *zero_rtt,
                     canceller_guard,
                 ));
             }

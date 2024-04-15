@@ -127,6 +127,7 @@ impl HTTPSUpstream {
                             address,
                             tls_client_config,
                             server_name,
+                            options.zero_rtt,
                             options
                                 .idle_timeout
                                 .unwrap_or_else(|| super::DEFAULT_IDLE_TIMEOUT),
@@ -724,6 +725,7 @@ mod http3 {
         address: super::network::SocksAddr,
         quic_client_config: quinn::ClientConfig,
         server_name: rustls::ServerName,
+        zero_rtt: bool,
         idle_timeout: Duration,
         bootstrap: Option<super::super::Bootstrap>,
         dialer: Arc<super::network::Dialer>,
@@ -739,6 +741,7 @@ mod http3 {
             address: super::network::SocksAddr,
             mut tls_client_config: tokio_rustls::rustls::ClientConfig,
             server_name: rustls::ServerName,
+            zero_rtt: bool,
             idle_timeout: Duration,
             bootstrap: Option<super::super::Bootstrap>,
             dialer: super::network::Dialer,
@@ -750,6 +753,7 @@ mod http3 {
                 address,
                 quic_client_config,
                 server_name,
+                zero_rtt,
                 idle_timeout,
                 bootstrap,
                 dialer: Arc::new(dialer),
@@ -851,21 +855,29 @@ mod http3 {
                     &self.dialer,
                     &self.quic_client_config,
                     self.get_server_name_str(),
+                    self.zero_rtt,
                 ),
-                |address, (dialer, quic_client_config, server_name)| {
+                |address, (dialer, quic_client_config, server_name, zero_rtt)| {
                     let dialer = (*dialer).clone();
                     let quic_client_config = (*quic_client_config).clone();
                     let server_name = server_name.clone();
+                    let zero_rtt = *zero_rtt;
                     async move {
                         dialer
-                            .new_quic_connection(address, quic_client_config, &server_name)
+                            .new_quic_connection(
+                                address,
+                                quic_client_config,
+                                &server_name,
+                                zero_rtt,
+                            )
                             .await
                     }
                 },
-                |ips, port, (dialer, quic_client_config, server_name)| {
+                |ips, port, (dialer, quic_client_config, server_name, zero_rtt)| {
                     let dialer = (*dialer).clone();
                     let quic_client_config = (*quic_client_config).clone();
                     let server_name = server_name.clone();
+                    let zero_rtt = *zero_rtt;
                     async move {
                         dialer
                             .parallel_new_quic_connection(
@@ -873,6 +885,7 @@ mod http3 {
                                 port,
                                 quic_client_config,
                                 &server_name,
+                                zero_rtt,
                             )
                             .await
                     }

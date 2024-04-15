@@ -126,6 +126,9 @@ pub struct HTTPSUpstreamOptions {
     #[serde(default)]
     #[serde(rename = "use-http3")]
     pub use_http3: bool,
+    #[serde(default)]
+    #[serde(rename = "zero-rtt")]
+    pub zero_rtt: bool,
     #[serde(flatten)]
     #[serde(default)]
     pub tls: UpstreamTLSOptions,
@@ -146,6 +149,9 @@ pub struct QUICUpstreamOptions {
     #[serde(rename = "disable-add-prefix")]
     #[serde(default)]
     pub disable_add_prefix: bool,
+    #[serde(default)]
+    #[serde(rename = "zero-rtt")]
+    pub zero_rtt: bool,
     #[serde(default)]
     #[serde(flatten)]
     pub tls: UpstreamTLSOptions,

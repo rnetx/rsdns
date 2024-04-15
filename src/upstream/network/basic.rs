@@ -154,6 +154,7 @@ impl BasicDialer {
         remote_addr: SocketAddr,
         quic_client_config: quinn::ClientConfig,
         server_name: &str,
+        zero_rtt: bool,
     ) -> io::Result<(quinn::Endpoint, quinn::Connection)> {
         let udp_socket = self.new_udp_socket(&remote_addr).await?;
         let runtime = Arc::new(quinn::TokioRuntime);
@@ -178,12 +179,24 @@ impl BasicDialer {
                     format!("failed to connect to QUIC server: {}", err),
                 )
             })?;
-        let quic_connection = quic_connecting.await.map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("failed to establish QUIC connection: {}", err),
-            )
-        })?;
+        let quic_connection = if zero_rtt {
+            match quic_connecting.into_0rtt() {
+                Ok((quic_connection, _)) => quic_connection,
+                Err(quic_connecting) => quic_connecting.await.map_err(|err| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("failed to establish QUIC connection: {}", err),
+                    )
+                })?,
+            }
+        } else {
+            quic_connecting.await.map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to establish QUIC connection: {}", err),
+                )
+            })?
+        };
         Ok((endpoint, quic_connection))
     }
 }

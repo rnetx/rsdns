@@ -20,6 +20,7 @@ pub(crate) struct QUICListener {
     query_timeout: Option<Duration>,
     tls_config: Arc<tokio_rustls::rustls::ServerConfig>,
     disable_prefix: bool,
+    zero_rtt: bool,
     canceller: Mutex<Option<common::Canceller>>,
 }
 
@@ -44,6 +45,7 @@ impl QUICListener {
             listen,
             workflow_tag: options.generic.workflow,
             disable_prefix: options.disable_prefix,
+            zero_rtt: options.zero_rtt,
             query_timeout: options.generic.query_timeout,
             tls_config: Arc::new(tls_config),
             canceller: Mutex::new(None),
@@ -57,6 +59,7 @@ impl QUICListener {
         query_timeout: Option<Duration>,
         listener_tag: String,
         disable_prefix: bool,
+        zero_rtt: bool,
         endpoint: quinn::Endpoint,
         canceller_guard: common::CancellerGuard,
     ) {
@@ -70,21 +73,43 @@ impl QUICListener {
                         let logger = logger.clone();
                         let canceller_guard = canceller_guard.clone();
                         let listener_tag = listener_tag.clone();
+                        let zero_rtt = zero_rtt;
                         join_set.spawn(async move {
-                          let conn = tokio::select! {
-                            res = c => {
-                                match res {
-                                    Ok(c) => c,
-                                    Err(_) => {
+                            let conn = if zero_rtt {
+                                match c.into_0rtt() {
+                                    Ok((conn, _)) => conn,
+                                    Err(c) => {
+                                        tokio::select! {
+                                            res = c => {
+                                                match res {
+                                                    Ok(c) => c,
+                                                    Err(_) => {
+                                                        return;
+                                                    }
+                                                }
+                                            }
+                                            _ = canceller_guard.cancelled() => {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                tokio::select! {
+                                    res = c => {
+                                        match res {
+                                            Ok(c) => c,
+                                            Err(_) => {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    _ = canceller_guard.cancelled() => {
                                         return;
                                     }
                                 }
-                            }
-                            _ = canceller_guard.cancelled() => {
-                                return;
-                            }
-                          };
-                          Self::conn_handle(workflow, logger, query_timeout, listener_tag, disable_prefix, conn, canceller_guard).await;
+                            };
+                            Self::conn_handle(workflow, logger, query_timeout, listener_tag, disable_prefix, conn, canceller_guard).await;
                         });
                         while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
                     }
@@ -118,24 +143,24 @@ impl QUICListener {
         let mut join_set = JoinSet::new();
         loop {
             tokio::select! {
-              res = conn.accept_bi() => {
-                if let Ok((send_stream, recv_stream)) = res {
-                  let workflow = workflow.clone();
-                  let logger = logger.clone();
-                  let canceller_guard = canceller_guard.clone();
-                  let peer_addr = conn.remote_address();
-                  let listener_tag = listener_tag.clone();
-                  join_set.spawn(async move {
-                    Self::stream_handle(workflow, logger, query_timeout, listener_tag, disable_prefix, send_stream, recv_stream, peer_addr, canceller_guard).await;
-                  });
-                  while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
-                } else {
+                res = conn.accept_bi() => {
+                    if let Ok((send_stream, recv_stream)) = res {
+                        let workflow = workflow.clone();
+                        let logger = logger.clone();
+                        let canceller_guard = canceller_guard.clone();
+                        let peer_addr = conn.remote_address();
+                        let listener_tag = listener_tag.clone();
+                        join_set.spawn(async move {
+                            Self::stream_handle(workflow, logger, query_timeout, listener_tag, disable_prefix, send_stream, recv_stream, peer_addr, canceller_guard).await;
+                        });
+                        while futures_util::FutureExt::now_or_never(join_set.join_next()).flatten().is_some() {}
+                    } else {
+                        break;
+                    }
+                }
+                _ = canceller_guard.cancelled() => {
                     break;
                 }
-              }
-              _ = canceller_guard.cancelled() => {
-                break;
-              }
             }
         }
         join_set.shutdown().await;
@@ -260,6 +285,7 @@ impl adapter::Common for QUICListener {
         let logger = self.logger.clone();
         let query_timeout = self.query_timeout;
         let disable_prefix = self.disable_prefix;
+        let zero_rtt = self.zero_rtt;
         tokio::spawn(async move {
             Self::handle(
                 manager,
@@ -268,6 +294,7 @@ impl adapter::Common for QUICListener {
                 query_timeout,
                 listener_tag,
                 disable_prefix,
+                zero_rtt,
                 quic_endpoint,
                 canceller_guard,
             )

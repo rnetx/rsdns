@@ -73,6 +73,9 @@ pub struct HTTPListenerOptions {
     #[serde(rename = "use-http3")]
     #[serde(default)]
     pub use_http3: bool,
+    #[serde(default)]
+    #[serde(rename = "zero-rtt")]
+    pub zero_rtt: bool,
     #[serde(flatten)]
     #[serde(default)]
     pub tls: Option<ListenerTLSOptions>,
@@ -87,6 +90,9 @@ pub struct QUICListenerOptions {
     #[serde(default)]
     #[serde(rename = "disable-prefix")]
     pub disable_prefix: bool,
+    #[serde(default)]
+    #[serde(rename = "zero-rtt")]
+    pub zero_rtt: bool,
     #[serde(flatten)]
     #[serde(default)]
     pub tls: ListenerTLSOptions,

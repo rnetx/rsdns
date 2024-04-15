@@ -418,6 +418,7 @@ async fn test_https_listener() {
                 server_cert_file: "/rsdns/src/tests/test-server-cert.pem".to_string(),
                 server_key_file: "/rsdns/src/tests/test-server-key.pem".to_string(),
             }),
+            zero_rtt: false,
             generic: option::GenericListenerOptions {
                 query_timeout: None,
                 workflow: Default::default(),
@@ -490,6 +491,7 @@ async fn test_h3_listener() {
                 server_cert_file: "/rsdns/src/tests/test-server-cert.pem".to_string(),
                 server_key_file: "/rsdns/src/tests/test-server-key.pem".to_string(),
             }),
+            zero_rtt: false,
             generic: option::GenericListenerOptions {
                 query_timeout: None,
                 workflow: Default::default(),
@@ -562,6 +564,7 @@ async fn test_quic_listener() {
                 server_cert_file: "/rsdns/src/tests/test-server-cert.pem".to_string(),
                 server_key_file: "/rsdns/src/tests/test-server-key.pem".to_string(),
             },
+            zero_rtt: false,
             disable_prefix: false,
             generic: option::GenericListenerOptions {
                 query_timeout: None,

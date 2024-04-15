@@ -119,6 +119,7 @@ impl Dialer {
         remote_addr: super::SocksAddr,
         quic_client_config: quinn::ClientConfig,
         server_name: &str,
+        zero_rtt: bool,
     ) -> io::Result<(quinn::Endpoint, quinn::Connection)> {
         match &self.dialer {
             DialerWrapper::Basic(basic_dialer) => {
@@ -127,14 +128,14 @@ impl Dialer {
                     "domain address is unsupported in basic dialer",
                 ))?;
                 basic_dialer
-                    .new_quic_connection(remote_addr, quic_client_config, server_name)
+                    .new_quic_connection(remote_addr, quic_client_config, server_name, zero_rtt)
                     .await
             }
 
             #[cfg(feature = "upstream-dialer-socks5")]
             DialerWrapper::Socks5(socks5_dialer) => {
                 socks5_dialer
-                    .new_quic_connection(remote_addr, quic_client_config, server_name)
+                    .new_quic_connection(remote_addr, quic_client_config, server_name, zero_rtt)
                     .await
             }
         }
@@ -189,11 +190,13 @@ impl Dialer {
         remote_addr: super::SocksAddr,
         quic_client_config: quinn::ClientConfig,
         server_name: &str,
+        zero_rtt: bool,
     ) -> io::Result<(quinn::Endpoint, quinn::Connection)> {
         self.with_connect_timeout(self.new_quic_connection_wrapper(
             remote_addr,
             quic_client_config,
             server_name,
+            zero_rtt,
         ))
         .await
     }
@@ -246,10 +249,11 @@ impl Dialer {
         port: u16,
         quic_client_config: quinn::ClientConfig,
         server_name: &str,
+        zero_rtt: bool,
     ) -> io::Result<(quinn::Endpoint, quinn::Connection)> {
         // TODO: Use First IP
         let addr = super::SocksAddr::SocketAddr(SocketAddr::new(remote_ip_addr[0], port));
-        self.new_quic_connection(addr, quic_client_config, server_name)
+        self.new_quic_connection(addr, quic_client_config, server_name, zero_rtt)
             .await
     }
 }

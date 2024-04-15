@@ -30,6 +30,7 @@ pub(crate) struct QUICUpstream {
     disable_add_prefix: bool,
     quic_client_config: quinn::ClientConfig,
     server_name: rustls::ServerName,
+    zero_rtt: bool,
     bootstrap: Option<super::Bootstrap>,
     dialer: Arc<network::Dialer>,
     //
@@ -87,6 +88,7 @@ impl QUICUpstream {
             address,
             quic_client_config,
             server_name,
+            zero_rtt: options.zero_rtt,
             bootstrap,
             dialer,
             last_use: Arc::new(AtomicI64::new(0)),
@@ -153,24 +155,33 @@ impl QUICUpstream {
                 &self.dialer,
                 &self.quic_client_config,
                 self.get_server_name_str(),
+                self.zero_rtt,
             ),
-            |address, (dialer, quic_client_config, server_name)| {
+            |address, (dialer, quic_client_config, server_name, zero_rtt)| {
                 let dialer = (*dialer).clone();
                 let quic_client_config = (*quic_client_config).clone();
                 let server_name = server_name.clone();
+                let zero_rtt = *zero_rtt;
                 async move {
                     dialer
-                        .new_quic_connection(address, quic_client_config, &server_name)
+                        .new_quic_connection(address, quic_client_config, &server_name, zero_rtt)
                         .await
                 }
             },
-            |ips, port, (dialer, quic_client_config, server_name)| {
+            |ips, port, (dialer, quic_client_config, server_name, zero_rtt)| {
                 let dialer = (*dialer).clone();
                 let quic_client_config = (*quic_client_config).clone();
                 let server_name = server_name.clone();
+                let zero_rtt = *zero_rtt;
                 async move {
                     dialer
-                        .parallel_new_quic_connection(ips, port, quic_client_config, &server_name)
+                        .parallel_new_quic_connection(
+                            ips,
+                            port,
+                            quic_client_config,
+                            &server_name,
+                            zero_rtt,
+                        )
                         .await
                 }
             },
